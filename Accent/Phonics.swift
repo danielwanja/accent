@@ -96,8 +96,17 @@ enum Phonics {
         issues.first { $0.id == id }
     }
 
-    /// Issue ids a word plausibly exercises, from its spelling (normalized form).
+    /// Issue ids a word exercises. Prefers the real phoneme sequence from the
+    /// lexicon; falls back to spelling heuristics for out-of-lexicon words.
     static func issueIDs(for norm: String) -> [String] {
+        if let fromLexicon = Lexicon.issueIDs(for: norm) {
+            return fromLexicon
+        }
+        return spellingIssueIDs(for: norm)
+    }
+
+    /// Spelling-pattern fallback (G2P-lite) for words CMUdict doesn't know.
+    static func spellingIssueIDs(for norm: String) -> [String] {
         var found: [String] = []
         if norm.contains("th") { found.append("th") }
         if norm.hasPrefix("h") { found.append("h") }

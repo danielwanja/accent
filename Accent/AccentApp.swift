@@ -32,7 +32,10 @@ struct RootView: View {
                 .tag(AppModel.Tab.progress)
         }
         .tint(Theme.accent)
-        .onAppear(perform: handleLaunchArguments)
+        .onAppear {
+            Lexicon.warmUp()
+            handleLaunchArguments()
+        }
     }
 
     /// DEBUG-only hooks so screens can be exercised from the command line:

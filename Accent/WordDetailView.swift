@@ -19,6 +19,13 @@ struct WordDetailView: View {
                 Spacer()
             }
 
+            if let ipa = Lexicon.ipa(for: word.norm) {
+                Text("/ \(ipa) /")
+                    .font(.system(size: 18, design: .serif))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityLabel("Expected pronunciation")
+            }
+
             Text(verdictText)
                 .font(.system(size: 15, weight: .regular, design: .serif))
                 .foregroundStyle(Theme.muted)
