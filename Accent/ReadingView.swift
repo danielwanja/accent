@@ -1,10 +1,14 @@
 import SwiftUI
+import SwiftData
 
 struct ReadingView: View {
-    @State private var session = ReadingSession()
+    @Environment(AppModel.self) private var app
+    @Environment(\.modelContext) private var context
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
+
+    private var session: ReadingSession { app.session }
 
     private struct SelectedWord: Identifiable {
         let id: Int
@@ -37,6 +41,9 @@ struct ReadingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.paper)
+        .onChange(of: session.status) { _, status in
+            if status == .finished { saveTake() }
+        }
         .sheet(isPresented: $showingPicker) {
             PassagePickerView { title, text in
                 session.load(title: title, text: text)
@@ -50,6 +57,30 @@ struct ReadingView: View {
                 .presentationDetents([.height(340)])
                 .presentationDragIndicator(.visible)
         }
+    }
+
+    /// Persist a finished take — only the words that were actually read.
+    private func saveTake() {
+        let stored: [StoredWord] = zip(session.passage.words, session.results).compactMap { word, result in
+            let state: String
+            switch result.state {
+            case .spoken: state = "spoken"
+            case .accented: state = "accented"
+            case .missed: state = "missed"
+            case .upcoming, .current: return nil
+            }
+            return StoredWord(
+                display: word.display, norm: word.norm, state: state,
+                heard: result.heard, confidence: result.confidence)
+        }
+        guard !stored.isEmpty else { return }
+        context.insert(TakeRecord(
+            date: Date(),
+            passageTitle: session.passageTitle,
+            passageText: session.passage.text,
+            words: stored,
+            recordingFile: session.recordingURL?.lastPathComponent))
+        try? context.save()
     }
 
     private var header: some View {
@@ -186,4 +217,6 @@ struct ReadingView: View {
 
 #Preview {
     ReadingView()
+        .environment(AppModel())
+        .modelContainer(for: TakeRecord.self, inMemory: true)
 }

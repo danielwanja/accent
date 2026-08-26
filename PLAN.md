@@ -176,8 +176,17 @@ big red circle.
   analyzer path needs a real-device pass.*
 - **M1 — Reading engine (2–3 wks):** any text, alignment + tier-1 scoring, word detail
   card with A/B reference audio, recordings saved.
+  ✅ *Done (Aug 2026): curated passages + paste-your-own, amber "accented" tier from
+  ASR word confidence (<45%), word detail card with native/slow/your-take audio,
+  takes recorded to Documents/Recordings. Verified in sim and on device.*
 - **M2 — The coach (3–4 wks):** diagnostic, issue profile, FoundationModels-generated
   drills & session flow, Today + Progress screens.
+  ✅ *Done (Aug 2026): Phonics issue taxonomy + spelling-heuristic word→issue mapping
+  (CMUdict upgrade deferred to M3), SwiftData take store, per-issue mastery profile,
+  diagnostic passage, Today (focus card + practice/diagnostic) and Progress (mastery
+  bars, clean-rate trend, history). Coach drills use FoundationModels on device with
+  curated fallback drills elsewhere — the LLM path compiles but still needs a
+  real-device pass. Ear-training minimal-pair tap test deferred to M4 polish.*
 - **M3 — Phoneme engine (4–6 wks, parallelizable):** Core ML phoneme model + GOP,
   per-phoneme feedback replaces heuristics, prosody/stress scoring.
 - **M4 — Polish & ship:** haptics/sound design, accessibility (critical: this is a
