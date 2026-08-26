@@ -93,17 +93,42 @@ final class ReadingSession {
             return
         }
         guard let url = engine.recordingURL else { return }
-        let jobs: [(Int, String, TimeInterval, TimeInterval, Bool)] = results.indices.compactMap { index in
+        let readIndices = results.indices.filter { index in
+            let state = results[index].state
+            return state == .spoken || state == .accented || state == .missed
+        }
+        guard !readIndices.isEmpty else { return }
+        status = .scoring
+
+        // One forced-alignment pass over the whole recording: our own word
+        // boundaries at 20 ms precision (the recognizer's timestamps are
+        // loose) and per-phoneme GOP without window bleed from neighbors.
+        let wordPhones = readIndices.map { Lexicon.phones(for: passage.words[$0].norm) ?? [] }
+        let aligned = await Task.detached(priority: .userInitiated) {
+            scorer.scoreUtterance(recording: url, wordPhones: wordPhones)
+        }.value
+
+        if let aligned {
+            for (position, alignment) in aligned.enumerated() {
+                guard let alignment else { continue }
+                let index = readIndices[position]
+                results[index].start = alignment.start
+                results[index].duration = alignment.duration
+                results[index].timingEstimated = false
+                results[index].phonemeScores = alignment.scores
+                applyTier2Verdict(at: index, scores: alignment.scores)
+            }
+            return
+        }
+
+        // Fallback: per-word windows from the recognizer's timestamps.
+        print("ACCENT tier-2 whole-take alignment unavailable; falling back to word windows")
+        let jobs: [(Int, String, TimeInterval, TimeInterval, Bool)] = readIndices.compactMap { index in
             let r = results[index]
-            guard r.state == .spoken || r.state == .accented || r.state == .missed,
-                  let start = r.start, let duration = r.duration else { return nil }
+            guard let start = r.start, let duration = r.duration else { return nil }
             return (index, passage.words[index].norm, start, duration, r.timingEstimated)
         }
-        guard !jobs.isEmpty else { return }
-        status = .scoring
         let scored = await Task.detached(priority: .userInitiated) {
-            // Budget the pass: on a slow compute path, partial tier-2 beats a
-            // frozen-looking screen.
             let deadline = Date().addingTimeInterval(12)
             var out: [(Int, [PhonemeScorer.PhonemeScore])] = []
             for (index, norm, start, duration, estimated) in jobs {
@@ -121,14 +146,19 @@ final class ReadingSession {
         }.value
         for (index, scores) in scored {
             results[index].phonemeScores = scores
-            // Upgrade only — tier 2 can worsen a verdict, never absolve one.
-            // Word-level thresholds sit looser than the per-phoneme chips:
-            // slice boundaries are estimates, and edge-clipped phones score
-            // worse than they were spoken (coach, not judge).
-            if results[index].state == .spoken, let worst = scores.map(\.gop).min() {
-                if worst < -6 { results[index].state = .missed }
-                else if worst < -2 { results[index].state = .accented }
-            }
+            applyTier2Verdict(at: index, scores: scores)
+        }
+    }
+
+    /// Upgrade only — tier 2 can worsen a verdict, never absolve one. With
+    /// forced-alignment boundaries the windows are precise, so word verdicts
+    /// use the same bands as the phoneme chips.
+    private func applyTier2Verdict(at index: Int, scores: [PhonemeScorer.PhonemeScore]) {
+        guard results[index].state == .spoken, let worst = scores.map(\.gop).min() else { return }
+        switch PhonemeScorer.Verdict(gop: worst) {
+        case .missed: results[index].state = .missed
+        case .accented: results[index].state = .accented
+        case .clean: break
         }
     }
 

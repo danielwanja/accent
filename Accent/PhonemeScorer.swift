@@ -170,6 +170,75 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         }
     }
 
+    // MARK: - Whole-take forced alignment
+
+    struct WordAlignment {
+        let start: TimeInterval      // in the recording's timeline
+        let duration: TimeInterval
+        let scores: [PhonemeScore]
+    }
+
+    /// wav2vec2's frame stride: 320 samples at 16 kHz.
+    private static let frameDuration = 0.02
+
+    /// One pass over the whole take: force-align the expected phone sequence
+    /// of every read word against the full recording. Yields per-word
+    /// boundaries at 20 ms precision — the recognizer's word timestamps are
+    /// recognition times, not phonetic boundaries, and cut into neighbors —
+    /// plus per-phoneme GOP from the same alignment. Entries with empty
+    /// phone lists (out-of-lexicon words) come back nil.
+    func scoreUtterance(recording: URL, wordPhones: [[String]]) -> [WordAlignment?]? {
+        guard wordPhones.contains(where: { !$0.isEmpty }) else { return nil }
+        guard let audio = try? Self.loadMono16k(url: recording, start: 0, duration: 600),
+              audio.count >= 1600 else { return nil }
+
+        var flat: [[Int]] = []
+        var owner: [Int] = []            // phone position → word index
+        var phoneBase: [String] = []
+        for (wordIndex, phones) in wordPhones.enumerated() {
+            for phone in phones {
+                let ids = Self.modelTokens(forArpa: phone).compactMap { tokenID[$0] }
+                guard !ids.isEmpty else { continue }
+                flat.append(ids)
+                owner.append(wordIndex)
+                phoneBase.append(phone.filter { !$0.isNumber })
+            }
+        }
+        guard !flat.isEmpty,
+              let logProbs = logPosteriors(audio: audio),
+              logProbs.count >= flat.count,
+              let assignment = Self.align(logProbs: logProbs, candidates: flat, blankID: blankID) else {
+            return nil
+        }
+
+        var scores = [[PhonemeScore]](repeating: [], count: wordPhones.count)
+        var firstFrame = [Int](repeating: .max, count: wordPhones.count)
+        var lastFrame = [Int](repeating: -1, count: wordPhones.count)
+        for (position, frames) in assignment.enumerated() {
+            let wordIndex = owner[position]
+            let ids = flat[position]
+            var gopSum = 0.0
+            for frame in frames {
+                let row = logProbs[frame]
+                let target = ids.map { row[$0] }.max() ?? -Double.infinity
+                let best = phoneIDs.map { row[$0] }.max() ?? 0
+                gopSum += target - best
+                firstFrame[wordIndex] = min(firstFrame[wordIndex], frame)
+                lastFrame[wordIndex] = max(lastFrame[wordIndex], frame)
+            }
+            let gop = frames.isEmpty ? -10.0 : gopSum / Double(frames.count)
+            let base = phoneBase[position]
+            scores[wordIndex].append(PhonemeScore(arpa: base, ipa: Lexicon.arpaToIPA[base] ?? base, gop: gop))
+        }
+
+        return wordPhones.indices.map { wordIndex in
+            guard lastFrame[wordIndex] >= 0 else { return nil }
+            let start = Double(firstFrame[wordIndex]) * Self.frameDuration
+            let end = Double(lastFrame[wordIndex] + 1) * Self.frameDuration
+            return WordAlignment(start: start, duration: end - start, scores: scores[wordIndex])
+        }
+    }
+
     // MARK: - Scoring
 
     /// Score a word slice of the session recording against its expected
