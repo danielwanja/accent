@@ -8,6 +8,7 @@ struct WordDetailView: View {
     let recordingURL: URL?
 
     @State private var coach = AudioCoach()
+    @State private var phonemeScores: [PhonemeScorer.PhonemeScore]?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -31,6 +32,10 @@ struct WordDetailView: View {
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let scores = phonemeScores {
+                phonemeRow(scores)
+            }
+
             Divider().overlay(Theme.line)
 
             HStack(spacing: 12) {
@@ -52,6 +57,37 @@ struct WordDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.paper)
         .onDisappear { coach.stopAll() }
+        .task {
+            // Tier-2: score this word's audio slice phoneme by phoneme.
+            guard let scorer = PhonemeScorer.shared,
+                  let url = recordingURL,
+                  let start = result.start, let duration = result.duration else { return }
+            let norm = word.norm
+            phonemeScores = await Task.detached(priority: .userInitiated) {
+                scorer.score(wordNorm: norm, recording: url, start: start, duration: duration)
+            }.value
+        }
+    }
+
+    /// One chip per expected phoneme, colored by its GOP verdict.
+    private func phonemeRow(_ scores: [PhonemeScorer.PhonemeScore]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(scores.enumerated()), id: \.offset) { _, score in
+                let color: Color = switch PhonemeScorer.Verdict(gop: score.gop) {
+                case .clean: Theme.ink
+                case .accented: Theme.amber
+                case .missed: Theme.accent
+                }
+                Text(score.ipa)
+                    .font(.system(size: 18, weight: .medium, design: .serif))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.45), lineWidth: 1))
+            }
+            Spacer()
+        }
+        .accessibilityLabel("Phoneme scores")
     }
 
     private var verdictBadge: some View {

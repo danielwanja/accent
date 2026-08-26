@@ -1,3 +1,7 @@
 build/
 xcuserdata/
 .DS_Store
+tools/venv/
+tools/models/
+# 189MB Core ML model - regenerate with tools/convert.py
+Accent/PhonemeRecognizer.mlpackage/

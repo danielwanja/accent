@@ -34,6 +34,11 @@ struct RootView: View {
         .tint(Theme.accent)
         .onAppear {
             Lexicon.warmUp()
+            #if DEBUG
+            Task.detached(priority: .utility) {
+                print("ACCENT phoneme scorer ready: \(PhonemeScorer.shared != nil)")
+            }
+            #endif
             handleLaunchArguments()
         }
     }
