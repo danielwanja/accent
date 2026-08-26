@@ -191,20 +191,17 @@ final class SpeechEngine {
     }
 
     /// Flattens an analyzer transcript into words. Each attributed run carries
-    /// an `audioTimeRange`; a run can span several words, which then share it.
+    /// an `audioTimeRange`; a run spanning several words gets its range
+    /// apportioned across them by expand().
     private static func timedWords(from transcript: AttributedString) -> [TimedWord] {
         var words: [TimedWord] = []
         for run in transcript.runs {
             let range = run.audioTimeRange
-            let text = String(transcript[run.range].characters)
-            for token in text.split(whereSeparator: \.isWhitespace) {
-                words.append(TimedWord(
-                    text: String(token),
-                    norm: Passage.normalize(String(token)),
-                    confidence: nil,
-                    start: range.map { $0.start.seconds },
-                    duration: range.map { $0.duration.seconds }))
-            }
+            words += TimedWord.expand(
+                text: String(transcript[run.range].characters),
+                confidence: nil,
+                start: range.map { $0.start.seconds },
+                duration: range.map { $0.duration.seconds })
         }
         return words
     }
@@ -229,14 +226,13 @@ final class SpeechEngine {
             }
             // Partial results report confidence 0 and no timing — map those to
             // nil. A hypothesis reset arrives as a final whose transcription is
-            // one empty segment, so drop empty tokens: downstream code detects
-            // the reset as an empty word list.
-            let words = result.bestTranscription.segments.compactMap { segment -> TimedWord? in
-                let norm = Passage.normalize(segment.substring)
-                guard !norm.isEmpty else { return nil }
-                return TimedWord(
+            // one empty segment; expand() drops empty tokens, so downstream
+            // code detects the reset as an empty word list. On-device
+            // recognition can return multi-word segments — expand() splits
+            // them and apportions the segment's time range.
+            let words = result.bestTranscription.segments.flatMap { segment in
+                TimedWord.expand(
                     text: segment.substring,
-                    norm: norm,
                     confidence: segment.confidence > 0 ? Double(segment.confidence) : nil,
                     start: segment.duration > 0 ? segment.timestamp : nil,
                     duration: segment.duration > 0 ? segment.duration : nil)
