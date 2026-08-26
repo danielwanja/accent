@@ -64,18 +64,23 @@ struct ReadingView: View {
         // One persistent sheet whose content swaps per word: re-presenting via
         // sheet(item:) on each tap loses the detent and jumps to full screen.
         .sheet(isPresented: $showingWordDetail) {
-            if let selected = selectedWord, session.results.indices.contains(selected.id) {
-                WordDetailView(
-                    word: session.passage.words[selected.id],
-                    result: session.results[selected.id],
-                    recordingURL: session.recordingURL)
-                    .id(selected.id)  // fresh card state (scores, audio) per word
-                    .presentationDetents([.height(340)])
-                    .presentationDragIndicator(.visible)
-                    // Let taps reach the passage behind the sheet, so tapping
-                    // the next word swaps the card in place.
-                    .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
+            // Presentation modifiers sit on a container that exists from the
+            // first frame: attached inside the `if let`, the first present
+            // could register no detent and open full screen.
+            Group {
+                if let selected = selectedWord, session.results.indices.contains(selected.id) {
+                    WordDetailView(
+                        word: session.passage.words[selected.id],
+                        result: session.results[selected.id],
+                        recordingURL: session.recordingURL)
+                        .id(selected.id)  // fresh card state (scores, audio) per word
+                }
             }
+            .presentationDetents([.height(340)])
+            .presentationDragIndicator(.visible)
+            // Let taps reach the passage behind the sheet, so tapping the
+            // next word swaps the card in place.
+            .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
         }
     }
 

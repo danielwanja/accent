@@ -141,10 +141,13 @@ final class ReadingSession {
         if update.isFinal {
             // An empty final means the recognizer reset without committing —
             // promote the volatile hypothesis rather than losing it.
-            finalizedWords += update.words.isEmpty ? volatileWords : update.words
+            finalizedWords += update.words.isEmpty
+                ? volatileWords
+                : TimedWord.trimOverlap(existing: finalizedWords, incoming: update.words)
             volatileWords = []
         } else {
-            volatileWords = update.words
+            // Analyzer volatiles can restate everything already finalized.
+            volatileWords = TimedWord.trimOverlap(existing: finalizedWords, incoming: update.words)
         }
         realign(inProgress: isRecording)
     }

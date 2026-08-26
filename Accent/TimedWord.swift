@@ -11,6 +11,26 @@ struct TimedWord {
     let start: TimeInterval?
     let duration: TimeInterval?
 
+    /// Drops the longest prefix of `incoming` that repeats the tail of
+    /// `existing` (matched on normalized text). The analyzer's volatile —
+    /// and sometimes final — hypotheses are cumulative from session start,
+    /// so without this the aligner briefly sees the whole text twice and
+    /// marks everything as missed. SFSpeech chunks don't overlap, so this
+    /// is a no-op there.
+    static func trimOverlap(existing: [TimedWord], incoming: [TimedWord]) -> [TimedWord] {
+        var k = min(existing.count, incoming.count)
+        while k > 0 {
+            var matches = true
+            for i in 0..<k where existing[existing.count - k + i].norm != incoming[i].norm {
+                matches = false
+                break
+            }
+            if matches { break }
+            k -= 1
+        }
+        return Array(incoming.dropFirst(k))
+    }
+
     /// Expands one recognizer chunk into per-word TimedWords. Both backends
     /// can hand back chunks spanning several words (on-device SFSpeech
     /// segments, analyzer attribute runs); aligning needs single words, and
