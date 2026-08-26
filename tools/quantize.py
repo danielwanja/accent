@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Int8-quantize the converted phoneme model and validate argmax agreement."""
+"""Int8-quantize the converted phoneme model and validate argmax agreement.
+
+VERDICT (2026-08-25): rejected for shipping. Argmax agreement is 100% and hard
+substitutions survive (sink-vs-THINK theta = -5.9), but quantization washes out
+the subtle GOP margins the coach depends on: zese-vs-THESE dh went -2.58 (fp16)
+to 0.00 (int8), erasing the "noticeably accented" tier. The app bundles fp16.
+Revisit with a real accented-speech eval set; try 6-bit palettization,
+per-channel quantization, or distillation before int8.
+"""
 import pathlib
 
 import numpy as np
