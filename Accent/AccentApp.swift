@@ -74,6 +74,20 @@ struct RootView: View {
            let issue = Phonics.issue(args[index + 1]) {
             app.startPractice(for: issue)
         }
+        if args.contains("-audiotest") {
+            // Exercises both playback paths with console diagnostics.
+            Task { @MainActor in
+                let coach = AudioCoach()
+                coach.speakReference("think")
+                try? await Task.sleep(for: .seconds(2.5))
+                let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("Recordings", isDirectory: true)
+                if let newest = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).first {
+                    coach.playSlice(recording: newest, start: 1.0, duration: 1.2)
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+        }
         #endif
     }
 
