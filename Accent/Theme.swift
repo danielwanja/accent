@@ -23,5 +23,6 @@ enum Theme {
     static let line = Color(uiColor: UIColor(light: 0xE2E2DA, dark: 0x30343C))
     static let accent = Color(uiColor: UIColor(light: 0xC24A3E, dark: 0xE06A5C))
     static let amberWash = Color(uiColor: UIColor(light: 0xF5E7C7, dark: 0x453B1C))
+    static let amber = Color(uiColor: UIColor(light: 0xC08A28, dark: 0xD9A054))
     static let upcoming = Color(uiColor: UIColor(light: 0xABB0B6, dark: 0x5C626B))
 }

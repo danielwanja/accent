@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// Drives one live reading of the M0 passage: starts/stops the speech engine,
-/// folds transcript updates into word states via the aligner.
+/// Drives one live reading of a passage: starts/stops the speech engine and
+/// folds transcript updates into per-word results via the aligner.
 @MainActor
 @Observable
 final class ReadingSession {
@@ -14,20 +14,35 @@ final class ReadingSession {
         case failed(String)
     }
 
-    // A th-heavy sentence — the classic French-speaker sounds, on purpose.
-    let passage = Passage(text: "I think these three brothers live near the theater.")
-
-    private(set) var states: [WordState]
+    private(set) var passage: Passage
+    private(set) var passageTitle: String
+    private(set) var results: [WordResult]
     private(set) var status: Status = .idle
     var isRecording: Bool { status == .listening }
+    var recordingURL: URL? { engine.recordingURL }
+
+    // Tier-1 scoring: a matched word whose ASR confidence falls below this is
+    // marked "accented" — right word, but the recognizer had to squint.
+    private let accentedThreshold = 0.45
 
     private let engine = SpeechEngine()
     private var prepared = false
-    private var finalizedText = ""
-    private var volatileText = ""
+    private var finalizedWords: [TimedWord] = []
+    private var volatileWords: [TimedWord] = []
 
     init() {
-        states = [WordState](repeating: .upcoming, count: passage.words.count)
+        let first = PassageLibrary.curated[0]
+        let passage = Passage(text: first.text)
+        self.passage = passage
+        passageTitle = first.title
+        results = [WordResult](repeating: WordResult(), count: passage.words.count)
+    }
+
+    func load(title: String, text: String) {
+        guard !isRecording else { return }
+        passage = Passage(text: text)
+        passageTitle = title
+        reset()
     }
 
     func toggle() {
@@ -50,7 +65,7 @@ final class ReadingSession {
             try await engine.start { [weak self] update in
                 self?.apply(update)
             }
-            if !states.isEmpty { states[0] = .current }
+            if !results.isEmpty { results[0].state = .current }
             status = .listening
         } catch {
             status = .failed(error.localizedDescription)
@@ -65,30 +80,32 @@ final class ReadingSession {
     }
 
     func reset(keepStatus: Bool = false) {
-        finalizedText = ""
-        volatileText = ""
-        states = [WordState](repeating: .upcoming, count: passage.words.count)
+        finalizedWords = []
+        volatileWords = []
+        results = [WordResult](repeating: WordResult(), count: passage.words.count)
         if !keepStatus { status = .idle }
     }
 
     private func apply(_ update: SpeechEngine.Update) {
-        let text = update.text.trimmingCharacters(in: .whitespaces)
         if update.isFinal {
             // An empty final means the recognizer reset without committing —
             // promote the volatile hypothesis rather than losing it.
-            finalizedText += " " + (text.isEmpty ? volatileText : text)
-            volatileText = ""
+            finalizedWords += update.words.isEmpty ? volatileWords : update.words
+            volatileWords = []
         } else {
-            volatileText = text
+            volatileWords = update.words
         }
         realign(inProgress: isRecording)
     }
 
     private func realign(inProgress: Bool) {
-        let tokens = (finalizedText + " " + volatileText)
-            .split(separator: " ")
-            .map { Passage.normalize(String($0)) }
-            .filter { !$0.isEmpty }
-        states = passage.align(hypothesis: tokens, inProgress: inProgress)
+        results = passage.align(hypothesis: finalizedWords + volatileWords, inProgress: inProgress)
+        if !inProgress {
+            for index in results.indices where results[index].state == .spoken {
+                if let confidence = results[index].confidence, confidence < accentedThreshold {
+                    results[index].state = .accented
+                }
+            }
+        }
     }
 }

@@ -3,23 +3,53 @@ import SwiftUI
 struct ReadingView: View {
     @State private var session = ReadingSession()
     @State private var pulse = false
+    @State private var showingPicker = false
+    @State private var selectedWord: SelectedWord?
+
+    private struct SelectedWord: Identifiable {
+        let id: Int
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Spacer()
-            Text(passageText)
-                .font(.system(size: 32, weight: .regular, design: .serif))
-                .lineSpacing(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 28)
-                .animation(.easeOut(duration: 0.18), value: session.states)
-            Spacer()
+            Spacer(minLength: 0)
+            ScrollView {
+                Text(passageText)
+                    .font(.system(size: passageFontSize, weight: .regular, design: .serif))
+                    .lineSpacing(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
+                    .animation(.easeOut(duration: 0.18), value: session.results)
+                    .environment(\.openURL, OpenURLAction { url in
+                        if url.scheme == "accent", let index = Int(url.lastPathComponent),
+                           session.results.indices.contains(index) {
+                            selectedWord = SelectedWord(id: index)
+                        }
+                        return .handled
+                    })
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            Spacer(minLength: 0)
             statusLine
             controls
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.paper)
+        .sheet(isPresented: $showingPicker) {
+            PassagePickerView { title, text in
+                session.load(title: title, text: text)
+            }
+        }
+        .sheet(item: $selectedWord) { selected in
+            WordDetailView(
+                word: session.passage.words[selected.id],
+                result: session.results[selected.id],
+                recordingURL: session.recordingURL)
+                .presentationDetents([.height(340)])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var header: some View {
@@ -29,20 +59,36 @@ struct ReadingView: View {
                 .kerning(3)
                 .foregroundStyle(Theme.muted)
             Spacer()
-            Text("M0 · PASSAGE 1")
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .kerning(1.5)
+            Button {
+                showingPicker = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(session.passageTitle.uppercased())
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .kerning(1.5)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                }
                 .foregroundStyle(Theme.muted)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Choose passage")
+            .disabled(session.isRecording)
         }
         .padding(.horizontal, 28)
         .padding(.top, 24)
     }
 
+    private var passageFontSize: CGFloat {
+        session.passage.words.count > 30 ? 26 : 32
+    }
+
     private var passageText: AttributedString {
+        let tappable = session.status == .finished
         var result = AttributedString()
         for (index, word) in session.passage.words.enumerated() {
             var piece = AttributedString(word.display)
-            switch session.states[index] {
+            switch session.results[index].state {
             case .upcoming:
                 piece.foregroundColor = Theme.upcoming
             case .current:
@@ -50,9 +96,15 @@ struct ReadingView: View {
                 piece.backgroundColor = Theme.amberWash
             case .spoken:
                 piece.foregroundColor = Theme.ink
+            case .accented:
+                piece.foregroundColor = Theme.ink
+                piece.underlineStyle = Text.LineStyle(pattern: .solid, color: Theme.amber)
             case .missed:
                 piece.foregroundColor = Theme.ink
                 piece.underlineStyle = Text.LineStyle(pattern: .solid, color: Theme.accent)
+            }
+            if tappable {
+                piece.link = URL(string: "accent://word/\(index)")
             }
             result += piece
             if index < session.passage.words.count - 1 {
@@ -74,10 +126,10 @@ struct ReadingView: View {
 
     private var statusText: String {
         switch session.status {
-        case .idle: return "TAP RECORD, THEN READ THE SENTENCE ALOUD"
+        case .idle: return "TAP RECORD, THEN READ THE PASSAGE ALOUD"
         case .preparing: return "PREPARING SPEECH MODEL…"
         case .listening: return "LISTENING"
-        case .finished: return "DONE — RED UNDERLINE MARKS A MISS"
+        case .finished: return "DONE — TAP ANY WORD FOR DETAILS"
         case .failed(let message): return message.uppercased()
         }
     }

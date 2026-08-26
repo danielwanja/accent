@@ -29,7 +29,7 @@ final class SpeechEngine {
     /// restarts its hypothesis after each finalized utterance, so finals must
     /// be accumulated, never replaced.
     struct Update {
-        let text: String
+        let words: [TimedWord]
         let isFinal: Bool
     }
 
@@ -54,6 +54,11 @@ final class SpeechEngine {
     private var legacyRecognizer: SFSpeechRecognizer?
     private var legacyRequest: SFSpeechAudioBufferRecognitionRequest?
     private var legacyTask: SFSpeechRecognitionTask?
+
+    // Session recording, written from the mic tap. Timestamps in TimedWord are
+    // relative to the start of this file, which is what makes A/B slicing work.
+    private var recordingFile: AVAudioFile?
+    private(set) var recordingURL: URL?
 
     /// Ask for permissions and pick the best available backend.
     func prepare() async throws {
@@ -102,6 +107,8 @@ final class SpeechEngine {
         try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
+        startRecordingFile()
+
         switch backend {
         case .analyzer:
             try await startAnalyzer(onUpdate: onUpdate)
@@ -115,6 +122,7 @@ final class SpeechEngine {
     func stop() async {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        recordingFile = nil  // releasing flushes the file
 
         inputBuilder?.finish()
         inputBuilder = nil
@@ -130,6 +138,24 @@ final class SpeechEngine {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    // MARK: - Session recording
+
+    private func startRecordingFile() {
+        recordingFile = nil
+        recordingURL = nil
+        do {
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Recordings", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("read-\(Int(Date().timeIntervalSince1970)).caf")
+            let tapFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+            recordingFile = try AVAudioFile(forWriting: url, settings: tapFormat.settings)
+            recordingURL = url
+        } catch {
+            print("ACCENT recording unavailable: \(error)")  // session still works, just no A/B audio
+        }
+    }
+
     // MARK: - SpeechAnalyzer backend
 
     private func startAnalyzer(onUpdate: @escaping @MainActor (Update) -> Void) async throws {
@@ -138,10 +164,10 @@ final class SpeechEngine {
         recognizerTask = Task {
             do {
                 for try await result in transcriber.results {
-                    let text = String(result.text.characters)
+                    let words = Self.timedWords(from: result.text)
                     let isFinal = result.isFinal
                     await MainActor.run {
-                        onUpdate(Update(text: text, isFinal: isFinal))
+                        onUpdate(Update(words: words, isFinal: isFinal))
                     }
                 }
             } catch {
@@ -155,11 +181,32 @@ final class SpeechEngine {
         let inputNode = audioEngine.inputNode
         let tapFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
-            guard let self, let format = self.analyzerFormat else { return }
+            guard let self else { return }
+            try? self.recordingFile?.write(from: buffer)
+            guard let format = self.analyzerFormat else { return }
             guard let converted = try? self.converter.convert(buffer, to: format) else { return }
             self.inputBuilder?.yield(AnalyzerInput(buffer: converted))
         }
         try await analyzer.start(inputSequence: inputSequence)
+    }
+
+    /// Flattens an analyzer transcript into words. Each attributed run carries
+    /// an `audioTimeRange`; a run can span several words, which then share it.
+    private static func timedWords(from transcript: AttributedString) -> [TimedWord] {
+        var words: [TimedWord] = []
+        for run in transcript.runs {
+            let range = run.audioTimeRange
+            let text = String(transcript[run.range].characters)
+            for token in text.split(whereSeparator: \.isWhitespace) {
+                words.append(TimedWord(
+                    text: String(token),
+                    norm: Passage.normalize(String(token)),
+                    confidence: nil,
+                    start: range.map { $0.start.seconds },
+                    duration: range.map { $0.duration.seconds }))
+            }
+        }
+        return words
     }
 
     // MARK: - SFSpeechRecognizer backend
@@ -177,18 +224,35 @@ final class SpeechEngine {
         legacyTask = recognizer.recognitionTask(with: request) { result, error in
             if let error { print("ACCENT sfspeech error: \(error)") }
             guard let result else { return }
-            print("ACCENT sfspeech result final=\(result.isFinal): \(result.bestTranscription.formattedString)")
-            let text = result.bestTranscription.formattedString
+            if result.isFinal {
+                print("ACCENT final segments: \(result.bestTranscription.segments.map { "\($0.substring)|c\($0.confidence)|t\($0.timestamp)+\($0.duration)" })")
+            }
+            // Partial results report confidence 0 and no timing — map those to
+            // nil. A hypothesis reset arrives as a final whose transcription is
+            // one empty segment, so drop empty tokens: downstream code detects
+            // the reset as an empty word list.
+            let words = result.bestTranscription.segments.compactMap { segment -> TimedWord? in
+                let norm = Passage.normalize(segment.substring)
+                guard !norm.isEmpty else { return nil }
+                return TimedWord(
+                    text: segment.substring,
+                    norm: norm,
+                    confidence: segment.confidence > 0 ? Double(segment.confidence) : nil,
+                    start: segment.duration > 0 ? segment.timestamp : nil,
+                    duration: segment.duration > 0 ? segment.duration : nil)
+            }
             let isFinal = result.isFinal
             Task { @MainActor in
-                onUpdate(Update(text: text, isFinal: isFinal))
+                onUpdate(Update(words: words, isFinal: isFinal))
             }
         }
 
         let inputNode = audioEngine.inputNode
         let tapFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
-            self?.legacyRequest?.append(buffer)
+            guard let self else { return }
+            try? self.recordingFile?.write(from: buffer)
+            self.legacyRequest?.append(buffer)
         }
     }
 }
