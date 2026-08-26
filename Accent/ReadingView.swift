@@ -7,6 +7,7 @@ struct ReadingView: View {
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
+    @State private var showingWordDetail = false
     @State private var lastTickedWord = -1
 
     private var session: ReadingSession { app.session }
@@ -32,6 +33,7 @@ struct ReadingView: View {
                         if url.scheme == "accent", let index = Int(url.lastPathComponent),
                            session.results.indices.contains(index) {
                             selectedWord = SelectedWord(id: index)
+                            showingWordDetail = true
                         }
                         return .handled
                     })
@@ -59,16 +61,21 @@ struct ReadingView: View {
                 session.load(title: title, text: text)
             }
         }
-        .sheet(item: $selectedWord) { selected in
-            WordDetailView(
-                word: session.passage.words[selected.id],
-                result: session.results[selected.id],
-                recordingURL: session.recordingURL)
-                .presentationDetents([.height(340)])
-                .presentationDragIndicator(.visible)
-                // Let taps reach the passage behind the sheet, so tapping the
-                // next word swaps the card instead of just dismissing.
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
+        // One persistent sheet whose content swaps per word: re-presenting via
+        // sheet(item:) on each tap loses the detent and jumps to full screen.
+        .sheet(isPresented: $showingWordDetail) {
+            if let selected = selectedWord, session.results.indices.contains(selected.id) {
+                WordDetailView(
+                    word: session.passage.words[selected.id],
+                    result: session.results[selected.id],
+                    recordingURL: session.recordingURL)
+                    .id(selected.id)  // fresh card state (scores, audio) per word
+                    .presentationDetents([.height(340)])
+                    .presentationDragIndicator(.visible)
+                    // Let taps reach the passage behind the sheet, so tapping
+                    // the next word swaps the card in place.
+                    .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
+            }
         }
     }
 
