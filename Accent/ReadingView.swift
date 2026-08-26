@@ -7,7 +7,6 @@ struct ReadingView: View {
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
-    @State private var showingWordDetail = false
     @State private var lastTickedWord = -1
 
     private var session: ReadingSession { app.session }
@@ -32,8 +31,9 @@ struct ReadingView: View {
                     .environment(\.openURL, OpenURLAction { url in
                         if url.scheme == "accent", let index = Int(url.lastPathComponent),
                            session.results.indices.contains(index) {
-                            selectedWord = SelectedWord(id: index)
-                            showingWordDetail = true
+                            withAnimation(.spring(duration: 0.3)) {
+                                selectedWord = SelectedWord(id: index)
+                            }
                         }
                         return .handled
                     })
@@ -45,8 +45,27 @@ struct ReadingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.paper)
+        .onAppear {
+            #if DEBUG
+            // "-showword N" opens word N's card once the take finishes.
+            let args = ProcessInfo.processInfo.arguments
+            if let index = args.firstIndex(of: "-showword"), index + 1 < args.count,
+               let wordIndex = Int(args[index + 1]) {
+                Task { @MainActor in
+                    while session.status != .finished { try? await Task.sleep(for: .seconds(1)) }
+                    if session.results.indices.contains(wordIndex) {
+                        withAnimation { selectedWord = SelectedWord(id: wordIndex) }
+                    }
+                }
+            }
+            #endif
+        }
         .onChange(of: session.status) { _, status in
             if status == .finished { saveTake() }
+            // A new take invalidates the open word card.
+            if status == .preparing || status == .listening {
+                withAnimation { selectedWord = nil }
+            }
         }
         .onChange(of: session.results) { _, results in
             // Quiet haptic tick as the highlight advances to a new word.
@@ -61,27 +80,52 @@ struct ReadingView: View {
                 session.load(title: title, text: text)
             }
         }
-        // One persistent sheet whose content swaps per word: re-presenting via
-        // sheet(item:) on each tap loses the detent and jumps to full screen.
-        .sheet(isPresented: $showingWordDetail) {
-            // Presentation modifiers sit on a container that exists from the
-            // first frame: attached inside the `if let`, the first present
-            // could register no detent and open full screen.
-            Group {
-                if let selected = selectedWord, session.results.indices.contains(selected.id) {
-                    WordDetailView(
-                        word: session.passage.words[selected.id],
-                        result: session.results[selected.id],
-                        recordingURL: session.recordingURL)
-                        .id(selected.id)  // fresh card state (scores, audio) per word
-                }
+        // Custom bottom card instead of a sheet: SwiftUI's sheet kept
+        // misbehaving here (detents dropped on item swap, empty content on
+        // first present). An overlay swaps words instantly and leaves the
+        // passage tappable above it.
+        .overlay(alignment: .bottom) {
+            if let selected = selectedWord, session.results.indices.contains(selected.id) {
+                wordCard(for: selected)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .presentationDetents([.height(340)])
-            .presentationDragIndicator(.visible)
-            // Let taps reach the passage behind the sheet, so tapping the
-            // next word swaps the card in place.
-            .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
         }
+    }
+
+    /// The word detail card, presented as an editorial bottom panel.
+    private func wordCard(for selected: SelectedWord) -> some View {
+        WordDetailView(
+            word: session.passage.words[selected.id],
+            result: session.results[selected.id],
+            recordingURL: session.recordingURL)
+            .id(selected.id)  // fresh card state (scores, audio) per word
+            .frame(height: 340, alignment: .top)
+            .frame(maxWidth: .infinity)
+            .background(Theme.paper)
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
+            .overlay(alignment: .top) {
+                UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
+                    .stroke(Theme.line, lineWidth: 1)
+            }
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    withAnimation(.spring(duration: 0.3)) { selectedWord = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close word details")
+            }
+            .shadow(color: .black.opacity(0.14), radius: 18, y: -4)
+            .gesture(
+                DragGesture(minimumDistance: 20).onEnded { value in
+                    if value.translation.height > 40 {
+                        withAnimation(.spring(duration: 0.3)) { selectedWord = nil }
+                    }
+                })
     }
 
     /// Persist a finished take — only the words that were actually read.
