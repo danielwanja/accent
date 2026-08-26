@@ -147,7 +147,18 @@ struct WordDetailView: View {
             }
             return "Recognized, but with low confidence\(confidenceNote)."
         case .missed:
-            if let heard = result.heard {
+            // A missed verdict can come from tier-2 even when the recognizer
+            // got the word — blame the phonemes, not the recognition.
+            let heardTheWord = result.heard.map { Passage.normalize($0) == word.norm } ?? false
+            if heardTheWord, let scores = phonemeScores ?? result.phonemeScores {
+                let off = scores
+                    .filter { PhonemeScorer.Verdict(gop: $0.gop) == .missed }
+                    .map { "/\($0.ipa)/" }
+                if !off.isEmpty {
+                    return "The word was understood, but \(off.joined(separator: ", ")) \(off.count == 1 ? "was" : "were") far from the native sound."
+                }
+            }
+            if let heard = result.heard, !heardTheWord {
                 return "Heard “\(heard)” instead\(confidenceNote)."
             }
             return "Skipped — the recognizer never heard this word."

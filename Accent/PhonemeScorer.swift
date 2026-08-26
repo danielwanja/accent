@@ -194,14 +194,14 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
 
         var flat: [[Int]] = []
         var owner: [Int] = []            // phone position → word index
-        var phoneBase: [String] = []
+        var phoneLabel: [String] = []    // original phone, stress digit kept
         for (wordIndex, phones) in wordPhones.enumerated() {
             for phone in phones {
                 let ids = Self.modelTokens(forArpa: phone).compactMap { tokenID[$0] }
                 guard !ids.isEmpty else { continue }
                 flat.append(ids)
                 owner.append(wordIndex)
-                phoneBase.append(phone.filter { !$0.isNumber })
+                phoneLabel.append(phone)
             }
         }
         guard !flat.isEmpty,
@@ -227,8 +227,11 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
                 lastFrame[wordIndex] = max(lastFrame[wordIndex], frame)
             }
             let gop = frames.isEmpty ? -10.0 : gopSum / Double(frames.count)
-            let base = phoneBase[position]
-            scores[wordIndex].append(PhonemeScore(arpa: base, ipa: Lexicon.arpaToIPA[base] ?? base, gop: gop))
+            let phone = phoneLabel[position]
+            scores[wordIndex].append(PhonemeScore(
+                arpa: phone.filter { !$0.isNumber },
+                ipa: Lexicon.ipa(forPhone: phone),
+                gop: gop))
         }
 
         return wordPhones.indices.map { wordIndex in
@@ -282,8 +285,10 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
                 gopSum += target - best
             }
             let gop = ownFrames.isEmpty ? -10.0 : gopSum / Double(ownFrames.count)
-            let base = phone.filter { !$0.isNumber }
-            return PhonemeScore(arpa: base, ipa: Lexicon.arpaToIPA[base] ?? base, gop: gop)
+            return PhonemeScore(
+                arpa: phone.filter { !$0.isNumber },
+                ipa: Lexicon.ipa(forPhone: phone),
+                gop: gop)
         }
     }
 

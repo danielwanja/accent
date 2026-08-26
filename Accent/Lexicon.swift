@@ -44,14 +44,18 @@ enum Lexicon {
         guard let phones = phones(for: norm) else { return nil }
         var out = ""
         for phone in phones {
-            let base = phone.filter { !$0.isNumber }
             if phone.hasSuffix("1") { out += "ˈ" }
             else if phone.hasSuffix("2") { out += "ˌ" }
-            // Unstressed AH is schwa: "the" is /ðə/, not /ðʌ/.
-            if base == "AH", phone.hasSuffix("0") { out += "ə" }
-            else { out += arpaToIPA[base] ?? base.lowercased() }
+            out += ipa(forPhone: phone)
         }
         return out
+    }
+
+    /// Display form of one phone, stress-aware: AH0 is schwa.
+    static func ipa(forPhone phone: String) -> String {
+        let base = phone.filter { !$0.isNumber }
+        if base == "AH", phone.hasSuffix("0") { return "ə" }
+        return arpaToIPA[base] ?? base.lowercased()
     }
 
     static let arpaToIPA: [String: String] = [
