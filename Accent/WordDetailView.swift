@@ -65,8 +65,10 @@ struct WordDetailView: View {
                 return
             }
             guard let url = recordingURL,
-                  let start = result.start, let duration = result.duration,
-                  let scorer = await PhonemeScorer.loaded() else { return }
+                  let start = result.start, let duration = result.duration else { return }
+            var loadedScorer = PhonemeScorer.ready
+            if loadedScorer == nil { loadedScorer = await PhonemeScorer.loaded() }
+            guard let scorer = loadedScorer else { return }
             let norm = word.norm
             phonemeScores = await Task.detached(priority: .userInitiated) {
                 scorer.score(wordNorm: norm, recording: url, start: start, duration: duration)

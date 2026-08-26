@@ -59,27 +59,66 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         stopAll()
         activatePlayback()
         do {
-            let player = try AVAudioPlayer(contentsOf: url)
+            let slice = try Self.extractSlice(from: url, start: start, duration: duration)
+            let player = try AVAudioPlayer(contentsOf: slice)
             self.player = player
             player.delegate = self
             player.volume = 1
             guard player.prepareToPlay() else {
-                print("ACCENT audio: prepareToPlay failed for \(url.lastPathComponent)")
+                print("ACCENT audio: prepareToPlay failed for \(slice.lastPathComponent)")
                 return
             }
-            // A hair of context on each side keeps clipped consonants audible;
-            // clamp so a drifted timestamp can't seek past the file.
-            let pad = 0.08
-            let from = min(max(0, start - pad), max(0, player.duration - 0.1))
-            player.currentTime = from
             let began = player.play()
-            print("ACCENT audio: slice \(url.lastPathComponent) t=\(String(format: "%.2f", from))s dur=\(String(format: "%.2f", duration))s began=\(began)")
-            let item = DispatchWorkItem { [weak self] in self?.player?.stop() }
-            stopItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 2 * pad, execute: item)
+            print("ACCENT audio: slice t=\(String(format: "%.2f", start))s dur=\(String(format: "%.2f", duration))s began=\(began)")
         } catch {
             print("ACCENT audio: slice player failed: \(error)")
         }
+    }
+
+    /// Cut the word's slice into a temp file, peak-normalized: raw mic level
+    /// is far below synthesized speech, and quiet reads as muffled next to
+    /// the NATIVE reference.
+    private static func extractSlice(from url: URL, start: TimeInterval, duration: TimeInterval) throws -> URL {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        let pad = 0.08
+        let startFrame = AVAudioFramePosition(max(0, start - pad) * format.sampleRate)
+        let frameCount = AVAudioFrameCount(max(0, min(
+            Double(file.length - startFrame),
+            (duration + 2 * pad) * format.sampleRate)))
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw NSError(domain: "AudioCoach", code: 1)
+        }
+        file.framePosition = startFrame
+        try file.read(into: buffer, frameCount: frameCount)
+
+        if let channels = buffer.floatChannelData {
+            var peak: Float = 0
+            for channel in 0..<Int(format.channelCount) {
+                for i in 0..<Int(buffer.frameLength) {
+                    peak = max(peak, abs(channels[channel][i]))
+                }
+            }
+            if peak > 0.001, peak < 0.85 {
+                let gain = 0.9 / peak
+                for channel in 0..<Int(format.channelCount) {
+                    for i in 0..<Int(buffer.frameLength) {
+                        channels[channel][i] *= gain
+                    }
+                }
+                print("ACCENT audio: slice normalized, peak \(String(format: "%.3f", peak)) gain ×\(String(format: "%.1f", gain))")
+            }
+        }
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("word-slice.caf")
+        try? FileManager.default.removeItem(at: tmp)
+        // Inner scope so the AVAudioFile flushes before the player opens it.
+        do {
+            let out = try AVAudioFile(forWriting: tmp, settings: format.settings)
+            try out.write(from: buffer)
+        }
+        return tmp
     }
 
     func stopAll() {
