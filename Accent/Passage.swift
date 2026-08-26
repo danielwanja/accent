@@ -39,9 +39,20 @@ struct Passage {
     }
 
     static func normalize(_ word: String) -> String {
-        word.lowercased()
+        let filtered = word.lowercased()
             .filter { $0.isLetter || $0.isNumber || $0 == "'" }
             .replacingOccurrences(of: "'", with: "")
+        // ASR writes digits ("three" → "3"); spell them out so both sides of
+        // the alignment agree.
+        if !filtered.isEmpty, filtered.allSatisfy(\.isNumber), let value = Int(filtered) {
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: "en_US")
+            formatter.numberStyle = .spellOut
+            if let spelled = formatter.string(from: NSNumber(value: value)) {
+                return spelled.lowercased().filter(\.isLetter)
+            }
+        }
+        return filtered
     }
 
     /// Align the recognizer's hypothesis against the passage and produce a

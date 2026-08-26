@@ -66,6 +66,9 @@ struct ReadingView: View {
                 recordingURL: session.recordingURL)
                 .presentationDetents([.height(340)])
                 .presentationDragIndicator(.visible)
+                // Let taps reach the passage behind the sheet, so tapping the
+                // next word swaps the card instead of just dismissing.
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
         }
     }
 

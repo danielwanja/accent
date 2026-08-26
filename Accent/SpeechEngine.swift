@@ -149,6 +149,7 @@ final class SpeechEngine {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appendingPathComponent("read-\(Int(Date().timeIntervalSince1970)).caf")
             let tapFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+            print("ACCENT recording format: \(Int(tapFormat.sampleRate))Hz \(tapFormat.channelCount)ch")
             recordingFile = try AVAudioFile(forWriting: url, settings: tapFormat.settings)
             recordingURL = url
         } catch {

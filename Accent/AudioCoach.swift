@@ -13,9 +13,13 @@ enum AudioSessionController {
         configured.withLock { done in
             guard !done else { return }
             do {
-                try AVAudioSession.sharedInstance().setCategory(
-                    .playAndRecord, mode: .spokenAudio,
+                let session = AVAudioSession.sharedInstance()
+                // Default mode: .spokenAudio constrained the capture chain
+                // (recordings sounded duller than a voice memo).
+                try session.setCategory(
+                    .playAndRecord,
                     options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
+                try? session.setPreferredSampleRate(48000)
                 done = true
             } catch {
                 print("ACCENT audio: session configure failed: \(error)")

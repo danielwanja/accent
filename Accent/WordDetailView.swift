@@ -128,6 +128,15 @@ struct WordDetailView: View {
         case .spoken:
             return "Recognized cleanly\(confidenceNote)."
         case .accented:
+            // Prefer the phoneme evidence when tier-2 produced it.
+            if let scores = phonemeScores ?? result.phonemeScores {
+                let drifted = scores
+                    .filter { PhonemeScorer.Verdict(gop: $0.gop) != .clean }
+                    .map { "/\($0.ipa)/" }
+                if !drifted.isEmpty {
+                    return "The word landed, but \(drifted.joined(separator: ", ")) drifted from the native target."
+                }
+            }
             if let heard = result.heard {
                 return "The recognizer got “\(heard)”, but only just\(confidenceNote). That hesitation usually means an accented vowel or consonant."
             }
