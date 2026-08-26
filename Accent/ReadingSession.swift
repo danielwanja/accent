@@ -143,11 +143,11 @@ final class ReadingSession {
             // promote the volatile hypothesis rather than losing it.
             finalizedWords += update.words.isEmpty
                 ? volatileWords
-                : TimedWord.trimOverlap(existing: finalizedWords, incoming: update.words)
+                : TimedWord.dedup(existing: finalizedWords, incoming: update.words)
             volatileWords = []
         } else {
-            // Analyzer volatiles can restate everything already finalized.
-            volatileWords = TimedWord.trimOverlap(existing: finalizedWords, incoming: update.words)
+            // Analyzer volatiles restate (and revise) already-finalized audio.
+            volatileWords = TimedWord.dedup(existing: finalizedWords, incoming: update.words)
         }
         realign(inProgress: isRecording)
     }

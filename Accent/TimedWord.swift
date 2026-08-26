@@ -11,12 +11,26 @@ struct TimedWord {
     let start: TimeInterval?
     let duration: TimeInterval?
 
-    /// Drops the longest prefix of `incoming` that repeats the tail of
-    /// `existing` (matched on normalized text). The analyzer's volatile —
-    /// and sometimes final — hypotheses are cumulative from session start,
-    /// so without this the aligner briefly sees the whole text twice and
-    /// marks everything as missed. SFSpeech chunks don't overlap, so this
-    /// is a no-op there.
+    /// Removes from `incoming` whatever restates audio that `existing`
+    /// already covers. The analyzer's hypotheses are cumulative from session
+    /// start AND it revises words when restating them, so text matching alone
+    /// is brittle — prefer the audio timeline: drop words starting before the
+    /// finalized frontier. Falls back to exact text-overlap trimming when
+    /// timestamps are absent (SFSpeech partials).
+    static func dedup(existing: [TimedWord], incoming: [TimedWord]) -> [TimedWord] {
+        let frontier = existing.compactMap { word in word.start.map { $0 + (word.duration ?? 0) } }.max()
+        if let frontier, incoming.contains(where: { $0.start != nil }) {
+            return incoming.filter { word in
+                guard let start = word.start else { return true }
+                return start >= frontier - 0.1
+            }
+        }
+        return trimOverlap(existing: existing, incoming: incoming)
+    }
+
+    /// Drops the longest prefix of `incoming` that exactly repeats the tail
+    /// of `existing` (matched on normalized text). SFSpeech chunks don't
+    /// overlap, so this is a no-op there.
     static func trimOverlap(existing: [TimedWord], incoming: [TimedWord]) -> [TimedWord] {
         var k = min(existing.count, incoming.count)
         while k > 0 {
