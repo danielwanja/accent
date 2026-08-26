@@ -1,17 +1,40 @@
 import AVFoundation
+import os
+
+/// One audio-session configuration for the app's whole life: .playAndRecord,
+/// spoken-audio mode, speaker output. Flipping categories between recording
+/// and playback left dead output units behind on device — TTS "played"
+/// zero-byte buffers ("AudioQueue underflow: injecting silence"). Configure
+/// once, never deactivate.
+enum AudioSessionController {
+    private static let configured = OSAllocatedUnfairLock(initialState: false)
+
+    static func ensureConfigured() {
+        configured.withLock { done in
+            guard !done else { return }
+            do {
+                try AVAudioSession.sharedInstance().setCategory(
+                    .playAndRecord, mode: .spokenAudio,
+                    options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
+                done = true
+            } catch {
+                print("ACCENT audio: session configure failed: \(error)")
+            }
+        }
+    }
+}
 
 /// Plays reference pronunciations (synthesized native voice) and slices of the
 /// user's own session recording — the two halves of the word A/B.
 @MainActor
 final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
-    private let synthesizer = AVSpeechSynthesizer()
+    // Recreated per utterance: a synthesizer that outlives audio-session
+    // changes can end up bound to a dead output unit and render zero-byte
+    // buffers ("AudioQueue underflow: injecting silence") — speech that
+    // "plays" silently.
+    private var synthesizer: AVSpeechSynthesizer?
     private var player: AVAudioPlayer?
     private var stopItem: DispatchWorkItem?
-
-    override init() {
-        super.init()
-        synthesizer.delegate = self
-    }
 
     // Best available en-US voice; premium/enhanced when the user has one downloaded.
     private static let voice: AVSpeechSynthesisVoice? =
@@ -26,6 +49,9 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         utterance.voice = Self.voice
         utterance.rate = slow ? 0.35 : AVSpeechUtteranceDefaultSpeechRate
         print("ACCENT audio: speak \"\(text)\" voice=\(Self.voice?.name ?? "default")")
+        let synthesizer = AVSpeechSynthesizer()
+        synthesizer.delegate = self
+        self.synthesizer = synthesizer
         synthesizer.speak(utterance)
     }
 
@@ -57,31 +83,26 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
 
     func stopAll() {
-        synthesizer.stopSpeaking(at: .immediate)
+        synthesizer?.stopSpeaking(at: .immediate)
+        synthesizer = nil
         player?.stop()
         player = nil
         stopItem?.cancel()
         stopItem = nil
     }
 
+    /// The app runs one session configuration for its whole life (see
+    /// AudioSessionController) — category flips between record and playback
+    /// are what produced dead output units. Just make sure it's active and
+    /// on the speaker.
     private func activatePlayback() {
         let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .spokenAudio)
-        } catch {
-            print("ACCENT audio: setCategory(.playback, .spokenAudio) failed: \(error)")
-            do { try session.setCategory(.playback) } catch {
-                print("ACCENT audio: setCategory(.playback) failed: \(error)")
-            }
-        }
+        AudioSessionController.ensureConfigured()
         do {
             try session.setActive(true)
         } catch {
             print("ACCENT audio: setActive failed: \(error)")
         }
-        // If the category change failed and we're stuck in .playAndRecord,
-        // output routes to the earpiece — force the speaker so playback is
-        // audible either way.
         if session.category == .playAndRecord {
             do { try session.overrideOutputAudioPort(.speaker) } catch {
                 print("ACCENT audio: speaker override failed: \(error)")

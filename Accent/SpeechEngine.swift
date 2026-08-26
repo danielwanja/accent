@@ -103,9 +103,8 @@ final class SpeechEngine {
     func start(onUpdate: @escaping @MainActor (Update) -> Void) async throws {
         guard let backend else { throw SpeechEngineError.notPrepared }
 
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker])
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        AudioSessionController.ensureConfigured()
+        try AVAudioSession.sharedInstance().setActive(true)
 
         startRecordingFile()
 
@@ -135,7 +134,8 @@ final class SpeechEngine {
         legacyRequest = nil
         legacyTask = nil
 
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // The session stays active and configured (AudioSessionController):
+        // deactivate/reactivate cycles are what broke playback on device.
     }
 
     // MARK: - Session recording
