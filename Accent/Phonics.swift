@@ -96,6 +96,20 @@ enum Phonics {
         issues.first { $0.id == id }
     }
 
+    /// Issue ids a single phoneme (stress-stripped ARPAbet) belongs to —
+    /// the phone-level issues only; ed/clusters/stress/linking stay word-level.
+    static func issueIDs(forPhone base: String) -> [String] {
+        switch base {
+        case "TH", "DH": return ["th"]
+        case "HH": return ["h"]
+        case "IH", "IY": return ["ih-ee"]
+        case "R", "ER": return ["r"]
+        case "CH", "JH", "SH", "ZH": return ["ch-sh"]
+        case "AE", "EH", "AH": return ["vowel-ae"]
+        default: return []
+        }
+    }
+
     /// Issue ids a word exercises. Prefers the real phoneme sequence from the
     /// lexicon; falls back to spelling heuristics for out-of-lexicon words.
     static func issueIDs(for norm: String) -> [String] {

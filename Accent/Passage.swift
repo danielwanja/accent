@@ -17,6 +17,8 @@ struct WordResult: Equatable {
     var confidence: Double? = nil
     var start: TimeInterval? = nil      // position in the session recording
     var duration: TimeInterval? = nil
+    /// Tier-2: per-phoneme GOP scores, filled in after the take ends.
+    var phonemeScores: [PhonemeScorer.PhonemeScore]? = nil
 }
 
 struct PassageWord: Identifiable {

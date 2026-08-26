@@ -1,6 +1,12 @@
 import Foundation
 import SwiftData
 
+/// One phoneme's tier-2 outcome inside a saved word.
+struct StoredPhoneme: Codable {
+    let arpa: String           // stress-stripped ARPAbet ("TH")
+    let gop: Double
+}
+
 /// One word's outcome inside a saved take.
 struct StoredWord: Codable {
     let display: String
@@ -8,6 +14,7 @@ struct StoredWord: Codable {
     let state: String          // "spoken" | "accented" | "missed"
     let heard: String?
     let confidence: Double?
+    var phonemes: [StoredPhoneme]? = nil   // optional: absent on pre-tier-2 takes
 }
 
 /// One completed reading, persisted.
@@ -52,9 +59,23 @@ enum IssueProfile {
         var misses: [String: Int] = [:]
         for take in takes {
             for word in take.words {
+                // With tier-2 phoneme scores, blame lands on the exact phoneme
+                // that scored badly; without them, a flagged word counts
+                // against every issue it exercises.
+                var phonemeMissed: Set<String> = []
+                var phonemeJudged: Set<String> = []
+                for phoneme in word.phonemes ?? [] {
+                    for id in Phonics.issueIDs(forPhone: phoneme.arpa) {
+                        phonemeJudged.insert(id)
+                        if phoneme.gop <= -1.0 { phonemeMissed.insert(id) }
+                    }
+                }
                 for id in Phonics.issueIDs(for: word.norm) {
                     attempts[id, default: 0] += 1
-                    if word.state != "spoken" { misses[id, default: 0] += 1 }
+                    let missed = phonemeJudged.contains(id)
+                        ? phonemeMissed.contains(id)
+                        : word.state != "spoken"
+                    if missed { misses[id, default: 0] += 1 }
                 }
             }
         }

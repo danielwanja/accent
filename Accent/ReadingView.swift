@@ -81,7 +81,8 @@ struct ReadingView: View {
             }
             return StoredWord(
                 display: word.display, norm: word.norm, state: state,
-                heard: result.heard, confidence: result.confidence)
+                heard: result.heard, confidence: result.confidence,
+                phonemes: result.phonemeScores?.map { StoredPhoneme(arpa: $0.arpa, gop: $0.gop) })
         }
         guard !stored.isEmpty else { return }
         context.insert(TakeRecord(
@@ -170,6 +171,7 @@ struct ReadingView: View {
         case .idle: return "TAP RECORD, THEN READ THE PASSAGE ALOUD"
         case .preparing: return "PREPARING SPEECH MODEL…"
         case .listening: return "LISTENING"
+        case .scoring: return "SCORING PHONEMES…"
         case .finished: return "DONE — TAP ANY WORD FOR DETAILS"
         case .failed(let message): return message.uppercased()
         }
@@ -207,7 +209,7 @@ struct ReadingView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(session.isRecording ? "Stop recording" : "Start recording")
-            .disabled(session.status == .preparing)
+            .disabled(session.status == .preparing || session.status == .scoring)
 
             Button {
                 session.reset()

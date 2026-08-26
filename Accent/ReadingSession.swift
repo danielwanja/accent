@@ -10,6 +10,7 @@ final class ReadingSession {
         case idle
         case preparing
         case listening
+        case scoring    // take ended, phoneme scoring in flight
         case finished
         case failed(String)
     }
@@ -76,7 +77,40 @@ final class ReadingSession {
         await engine.stop()
         // Final pass: no in-progress word, trailing words stay upcoming.
         realign(inProgress: false)
+        await scorePhonemes()
         status = .finished
+    }
+
+    /// Tier-2 pass: GOP-score each read word's audio slice and let strong
+    /// phoneme evidence upgrade the word verdict — this is what catches the
+    /// substitutions ASR normalizes away ("zis" transcribed as "this").
+    private func scorePhonemes() async {
+        guard let scorer = PhonemeScorer.shared, let url = engine.recordingURL else { return }
+        let jobs: [(Int, String, TimeInterval, TimeInterval)] = results.indices.compactMap { index in
+            let r = results[index]
+            guard r.state == .spoken || r.state == .accented || r.state == .missed,
+                  let start = r.start, let duration = r.duration else { return nil }
+            return (index, passage.words[index].norm, start, duration)
+        }
+        guard !jobs.isEmpty else { return }
+        status = .scoring
+        let scored = await Task.detached(priority: .userInitiated) {
+            jobs.compactMap { index, norm, start, duration -> (Int, [PhonemeScorer.PhonemeScore])? in
+                guard let scores = scorer.score(wordNorm: norm, recording: url, start: start, duration: duration) else { return nil }
+                return (index, scores)
+            }
+        }.value
+        for (index, scores) in scored {
+            results[index].phonemeScores = scores
+            // Upgrade only — tier 2 can worsen a verdict, never absolve one.
+            // Word-level thresholds sit looser than the per-phoneme chips:
+            // slice boundaries are estimates, and edge-clipped phones score
+            // worse than they were spoken (coach, not judge).
+            if results[index].state == .spoken, let worst = scores.map(\.gop).min() {
+                if worst < -6 { results[index].state = .missed }
+                else if worst < -2 { results[index].state = .accented }
+            }
+        }
     }
 
     func reset(keepStatus: Bool = false) {

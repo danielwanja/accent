@@ -58,7 +58,12 @@ struct WordDetailView: View {
         .background(Theme.paper)
         .onDisappear { coach.stopAll() }
         .task {
-            // Tier-2: score this word's audio slice phoneme by phoneme.
+            // Tier-2 scores usually arrive with the take; fall back to
+            // scoring this word's slice on demand.
+            if let stored = result.phonemeScores {
+                phonemeScores = stored
+                return
+            }
             guard let scorer = PhonemeScorer.shared,
                   let url = recordingURL,
                   let start = result.start, let duration = result.duration else { return }
