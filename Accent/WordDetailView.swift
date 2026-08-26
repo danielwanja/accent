@@ -62,10 +62,9 @@ struct WordDetailView: View {
                     }
                 }
             }
-            Spacer()
         }
         .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(Theme.paper)
         .onDisappear { coach.stopAll() }
         .task {

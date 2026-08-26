@@ -99,7 +99,9 @@ struct ReadingView: View {
             result: session.results[selected.id],
             recordingURL: session.recordingURL)
             .id(selected.id)  // fresh card state (scores, audio) per word
-            .frame(height: 340, alignment: .top)
+            // Hug the content (a stress line can lengthen it) and keep the
+            // buttons clear of the floating tab bar.
+            .padding(.bottom, 64)
             .frame(maxWidth: .infinity)
             .background(Theme.paper)
             .clipShape(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))

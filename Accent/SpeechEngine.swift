@@ -3,6 +3,7 @@ import Speech
 
 enum SpeechEngineError: LocalizedError {
     case microphoneDenied
+    case microphoneUnavailable
     case speechDenied
     case localeUnsupported
     case notPrepared
@@ -10,6 +11,7 @@ enum SpeechEngineError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .microphoneDenied: return "Microphone access was denied. Enable it in Settings."
+        case .microphoneUnavailable: return "The microphone isn't available right now — try again."
         case .speechDenied: return "Speech recognition access was denied. Enable it in Settings."
         case .localeUnsupported: return "English transcription isn't available on this device."
         case .notPrepared: return "Speech engine wasn't prepared before starting."
@@ -105,6 +107,14 @@ final class SpeechEngine {
         AudioSessionController.ensureConfigured()
         try AVAudioSession.sharedInstance().setActive(true)
 
+        // The input can report a 0 Hz format right after activation (mic
+        // busy, device flake). Installing a tap with it crashes with an
+        // uncatchable NSException — verify, retry once, then fail cleanly.
+        if !inputFormatIsValid {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard inputFormatIsValid else { throw SpeechEngineError.microphoneUnavailable }
+        }
+
         startRecordingFile()
 
         switch backend {
@@ -138,6 +148,11 @@ final class SpeechEngine {
 
         // The session stays active and configured (AudioSessionController):
         // deactivate/reactivate cycles are what broke playback on device.
+    }
+
+    private var inputFormatIsValid: Bool {
+        let format = audioEngine.inputNode.outputFormat(forBus: 0)
+        return format.sampleRate > 0 && format.channelCount > 0
     }
 
     // MARK: - Session recording
