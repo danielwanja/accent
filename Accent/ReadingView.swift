@@ -141,7 +141,8 @@ struct ReadingView: View {
             return StoredWord(
                 display: word.display, norm: word.norm, state: state,
                 heard: result.heard, confidence: result.confidence,
-                phonemes: result.phonemeScores?.map { StoredPhoneme(arpa: $0.arpa, gop: $0.gop) })
+                phonemes: result.phonemeScores?.map { StoredPhoneme(arpa: $0.arpa, gop: $0.gop) },
+                stressOK: result.stressCheck?.ok)
         }
         guard !stored.isEmpty else { return }
         context.insert(TakeRecord(

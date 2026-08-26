@@ -116,7 +116,12 @@ final class ReadingSession {
                 results[index].duration = alignment.duration
                 results[index].timingEstimated = false
                 results[index].phonemeScores = alignment.scores
+                results[index].stressCheck = alignment.stress
                 applyTier2Verdict(at: index, scores: alignment.scores)
+                // Misplaced stress alone makes a word "accented", never "missed".
+                if results[index].state == .spoken, alignment.stress?.ok == false {
+                    results[index].state = .accented
+                }
             }
             return
         }
@@ -154,7 +159,10 @@ final class ReadingSession {
     /// forced-alignment boundaries the windows are precise, so word verdicts
     /// use the same bands as the phoneme chips.
     private func applyTier2Verdict(at index: Int, scores: [PhonemeScorer.PhonemeScore]) {
-        guard results[index].state == .spoken, let worst = scores.map(\.gop).min() else { return }
+        guard results[index].state == .spoken else { return }
+        // Low-confidence phones (e.g. /h/) never convict a word on their own.
+        let reliable = scores.filter { !PhonemeScorer.lowConfidencePhones.contains($0.arpa) }
+        guard let worst = reliable.map(\.gop).min() else { return }
         switch PhonemeScorer.Verdict(gop: worst) {
         case .missed: results[index].state = .missed
         case .accented: results[index].state = .accented

@@ -68,7 +68,7 @@ enum Lexicon {
         "Y": "j", "Z": "z", "ZH": "ʒ",
     ]
 
-    private static let vowels: Set<String> = [
+    static let vowels: Set<String> = [
         "AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY",
         "IH", "IY", "OW", "OY", "UH", "UW",
     ]

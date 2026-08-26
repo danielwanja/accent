@@ -36,6 +36,14 @@ struct WordDetailView: View {
                 phonemeRow(scores)
             }
 
+            if let stress = result.stressCheck, !stress.ok {
+                Text("STRESS — you leaned on syllable \(stress.detectedSyllable + 1) of \(stress.syllableCount); natives punch syllable \(stress.expectedSyllable + 1).")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .kerning(0.5)
+                    .foregroundStyle(Theme.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Divider().overlay(Theme.line)
 
             HStack(spacing: 12) {
@@ -85,12 +93,12 @@ struct WordDetailView: View {
     private func phonemeRow(_ scores: [PhonemeScorer.PhonemeScore]) -> some View {
         HStack(spacing: 6) {
             ForEach(Array(scores.enumerated()), id: \.offset) { _, score in
-                let color: Color = switch PhonemeScorer.Verdict(gop: score.gop) {
+                let color: Color = switch Self.chipVerdict(for: score) {
                 case .clean: Theme.ink
                 case .accented: Theme.amber
                 case .missed: Theme.accent
                 }
-                Text(score.ipa)
+                Text((score.stressed ? "ˈ" : "") + score.ipa)
                     .font(.system(size: 18, weight: .medium, design: .serif))
                     .foregroundStyle(color)
                     .padding(.horizontal, 9)
@@ -165,6 +173,15 @@ struct WordDetailView: View {
         case .upcoming, .current:
             return "This word wasn't read in the last take."
         }
+    }
+
+    /// Chip color verdict; low-confidence phones (e.g. /h/) cap at amber.
+    private static func chipVerdict(for score: PhonemeScorer.PhonemeScore) -> PhonemeScorer.Verdict {
+        let verdict = PhonemeScorer.Verdict(gop: score.gop)
+        if verdict == .missed, PhonemeScorer.lowConfidencePhones.contains(score.arpa) {
+            return .accented
+        }
+        return verdict
     }
 
     private func audioButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {

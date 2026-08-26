@@ -20,6 +20,8 @@ struct WordResult: Equatable {
     var timingEstimated: Bool = false   // apportioned from a multi-word chunk
     /// Tier-2: per-phoneme GOP scores, filled in after the take ends.
     var phonemeScores: [PhonemeScorer.PhonemeScore]? = nil
+    /// Tier-3: lexical stress placement for multi-syllable words.
+    var stressCheck: PhonemeScorer.StressCheck? = nil
 }
 
 struct PassageWord: Identifiable {

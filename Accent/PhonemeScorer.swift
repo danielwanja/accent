@@ -13,9 +13,23 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         let arpa: String     // expected phone, stress stripped ("TH")
         let ipa: String      // display form ("θ")
         let gop: Double      // mean aligned log-posterior margin, ≤ 0
+        var stressed: Bool = false   // carries the word's primary stress
     }
 
-    /// GOP verdict bands, calibrated on synthesized think/sink/zese probes.
+    /// Lexical stress check for a multi-syllable word: which syllable the
+    /// speaker made prominent (energy × duration over aligned frames) vs the
+    /// one the lexicon stresses. Indexes count vowels, 0-based.
+    struct StressCheck: Equatable {
+        let expectedSyllable: Int
+        let detectedSyllable: Int
+        let syllableCount: Int
+        var ok: Bool { expectedSyllable == detectedSyllable }
+    }
+
+    /// GOP verdict bands, calibrated on a synthesized substitution battery
+    /// (tools/calibrate.swift, 2026-08-26): clean median 0.00; hard
+    /// substitutions (θ←s/t, ɪ-for-iː) land below -4; near-neighbors
+    /// (θ←f, ð←z) between -1 and -4.
     enum Verdict {
         case clean, accented, missed
         init(gop: Double) {
@@ -24,6 +38,12 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
             else { self = .missed }
         }
     }
+
+    /// Phones whose GOP the model can't judge reliably (same battery: clean
+    /// "hair" scored -5 while dropped-h "air" scored 0 — breathy vowel
+    /// onsets and /h/ are acoustically interchangeable to it). They never
+    /// drive word verdicts and cap at "accented" in the chips.
+    static let lowConfidencePhones: Set<String> = ["HH"]
 
     // MARK: - Background loading
     //
@@ -176,6 +196,7 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         let start: TimeInterval      // in the recording's timeline
         let duration: TimeInterval
         let scores: [PhonemeScore]
+        let stress: StressCheck?     // multi-syllable words with a marked stress
     }
 
     /// wav2vec2's frame stride: 320 samples at 16 kHz.
@@ -211,34 +232,71 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
             return nil
         }
 
+        // Per-frame RMS energy for stress prominence (frame stride 320,
+        // window 400 — wav2vec2's receptive geometry, roughly).
+        var rms = [Double](repeating: 0, count: logProbs.count)
+        for frame in rms.indices {
+            let lo = frame * 320
+            let hi = min(lo + 400, audio.count)
+            guard lo < hi else { break }
+            var sum = 0.0
+            for i in lo..<hi { sum += Double(audio[i]) * Double(audio[i]) }
+            rms[frame] = (sum / Double(hi - lo)).squareRoot()
+        }
+
         var scores = [[PhonemeScore]](repeating: [], count: wordPhones.count)
         var firstFrame = [Int](repeating: .max, count: wordPhones.count)
         var lastFrame = [Int](repeating: -1, count: wordPhones.count)
+        // Per word: (isStressed, prominence) for each vowel, in order.
+        var vowelProminence = [[(stressed: Bool, prominence: Double)]](repeating: [], count: wordPhones.count)
         for (position, frames) in assignment.enumerated() {
             let wordIndex = owner[position]
             let ids = flat[position]
             var gopSum = 0.0
+            var energySum = 0.0
             for frame in frames {
                 let row = logProbs[frame]
                 let target = ids.map { row[$0] }.max() ?? -Double.infinity
                 let best = phoneIDs.map { row[$0] }.max() ?? 0
                 gopSum += target - best
+                energySum += rms[frame]
                 firstFrame[wordIndex] = min(firstFrame[wordIndex], frame)
                 lastFrame[wordIndex] = max(lastFrame[wordIndex], frame)
             }
             let gop = frames.isEmpty ? -10.0 : gopSum / Double(frames.count)
             let phone = phoneLabel[position]
+            let base = phone.filter { !$0.isNumber }
             scores[wordIndex].append(PhonemeScore(
-                arpa: phone.filter { !$0.isNumber },
+                arpa: base,
                 ipa: Lexicon.ipa(forPhone: phone),
-                gop: gop))
+                gop: gop,
+                stressed: phone.hasSuffix("1")))
+            if Lexicon.vowels.contains(base) {
+                // Prominence = total energy over the vowel's frames — louder
+                // AND longer both push it up, which is what stress is.
+                vowelProminence[wordIndex].append((phone.hasSuffix("1"), energySum))
+            }
         }
 
         return wordPhones.indices.map { wordIndex in
             guard lastFrame[wordIndex] >= 0 else { return nil }
             let start = Double(firstFrame[wordIndex]) * Self.frameDuration
             let end = Double(lastFrame[wordIndex] + 1) * Self.frameDuration
-            return WordAlignment(start: start, duration: end - start, scores: scores[wordIndex])
+
+            var stress: StressCheck?
+            let vowels = vowelProminence[wordIndex]
+            if vowels.count >= 2, let expected = vowels.firstIndex(where: \.stressed) {
+                let detected = vowels.indices.max { vowels[$0].prominence < vowels[$1].prominence } ?? expected
+                // Close calls go to the speaker: only flag a clear shift.
+                let clear = vowels[detected].prominence > vowels[expected].prominence * 1.25
+                stress = StressCheck(
+                    expectedSyllable: expected,
+                    detectedSyllable: (detected == expected || !clear) ? expected : detected,
+                    syllableCount: vowels.count)
+            }
+            return WordAlignment(
+                start: start, duration: end - start,
+                scores: scores[wordIndex], stress: stress)
         }
     }
 

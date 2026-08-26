@@ -15,6 +15,7 @@ struct StoredWord: Codable {
     let heard: String?
     let confidence: Double?
     var phonemes: [StoredPhoneme]? = nil   // optional: absent on pre-tier-2 takes
+    var stressOK: Bool? = nil              // tier-3 lexical stress verdict
 }
 
 /// One completed reading, persisted.
@@ -65,6 +66,9 @@ enum IssueProfile {
                 var phonemeMissed: Set<String> = []
                 var phonemeJudged: Set<String> = []
                 for phoneme in word.phonemes ?? [] {
+                    // Unreliably-scored phones (e.g. /h/) fall back to
+                    // word-level attribution instead.
+                    guard !PhonemeScorer.lowConfidencePhones.contains(phoneme.arpa) else { continue }
                     for id in Phonics.issueIDs(forPhone: phoneme.arpa) {
                         phonemeJudged.insert(id)
                         if phoneme.gop <= -1.0 { phonemeMissed.insert(id) }
@@ -72,9 +76,14 @@ enum IssueProfile {
                 }
                 for id in Phonics.issueIDs(for: word.norm) {
                     attempts[id, default: 0] += 1
-                    let missed = phonemeJudged.contains(id)
-                        ? phonemeMissed.contains(id)
-                        : word.state != "spoken"
+                    let missed: Bool
+                    if id == "stress", let stressOK = word.stressOK {
+                        missed = !stressOK      // tier-3 measured it directly
+                    } else if phonemeJudged.contains(id) {
+                        missed = phonemeMissed.contains(id)
+                    } else {
+                        missed = word.state != "spoken"
+                    }
                     if missed { misses[id, default: 0] += 1 }
                 }
             }
