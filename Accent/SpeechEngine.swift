@@ -71,19 +71,18 @@ final class SpeechEngine {
         let installed = await SpeechTranscriber.installedLocales
 
         if supported.contains(where: isEnglish) || installed.contains(where: isEnglish) {
-            let transcriber = SpeechTranscriber(
+            // One-time: download the on-device speech model if needed. The
+            // transcriber/analyzer themselves are built fresh per session in
+            // startAnalyzer() — a finalized SpeechAnalyzer is terminal and
+            // silently ignores start().
+            let probe = SpeechTranscriber(
                 locale: locale,
                 transcriptionOptions: [],
                 reportingOptions: [.volatileResults],
                 attributeOptions: [.audioTimeRange])
-            self.transcriber = transcriber
-
-            // Downloads the on-device speech model if it isn't installed yet.
-            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [probe]) {
                 try await request.downloadAndInstall()
             }
-            analyzer = SpeechAnalyzer(modules: [transcriber])
-            analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
             backend = .analyzer
             return
         }
@@ -126,6 +125,9 @@ final class SpeechEngine {
         inputBuilder?.finish()
         inputBuilder = nil
         try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        analyzer = nil       // finished analyzers are terminal — never reuse
+        transcriber = nil
+        analyzerFormat = nil
         recognizerTask?.cancel()
         recognizerTask = nil
 
@@ -160,7 +162,17 @@ final class SpeechEngine {
     // MARK: - SpeechAnalyzer backend
 
     private func startAnalyzer(onUpdate: @escaping @MainActor (Update) -> Void) async throws {
-        guard let analyzer, let transcriber else { throw SpeechEngineError.notPrepared }
+        // Fresh modules every session: finalize marks an analyzer finished
+        // for good, so reusing one yields silence on the second take.
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: [.audioTimeRange])
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        self.transcriber = transcriber
+        self.analyzer = analyzer
+        analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
 
         recognizerTask = Task {
             do {

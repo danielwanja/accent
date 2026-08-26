@@ -54,13 +54,20 @@ struct RootView: View {
         if args.contains("-seedDemo") {
             seedDemoTakes()
         }
-        if let index = args.firstIndex(of: "-autoread"), index + 1 < args.count,
-           let seconds = Double(args[index + 1]) {
-            app.tab = .read
-            Task { @MainActor in
-                await app.session.start()
-                try? await Task.sleep(for: .seconds(seconds))
-                await app.session.stop()
+        if let index = args.firstIndex(of: "-autoread"), index + 1 < args.count {
+            // "-autoread 6" = one 6s take; "-autoread 6x2" = two back-to-back.
+            let spec = args[index + 1].split(separator: "x")
+            if let seconds = Double(spec[0]) {
+                let repeats = spec.count > 1 ? (Int(spec[1]) ?? 1) : 1
+                app.tab = .read
+                Task { @MainActor in
+                    for round in 0..<repeats {
+                        await app.session.start()
+                        try? await Task.sleep(for: .seconds(seconds))
+                        await app.session.stop()
+                        if round < repeats - 1 { try? await Task.sleep(for: .seconds(3)) }
+                    }
+                }
             }
         }
         if let index = args.firstIndex(of: "-tab"), index + 1 < args.count {
