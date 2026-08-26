@@ -85,7 +85,14 @@ final class ReadingSession {
     /// phoneme evidence upgrade the word verdict — this is what catches the
     /// substitutions ASR normalizes away ("zis" transcribed as "this").
     private func scorePhonemes() async {
-        guard let scorer = PhonemeScorer.shared, let url = engine.recordingURL else { return }
+        // Never wait for the model: if the background load hasn't finished
+        // (first device launch), this take stays tier-1 and the next one
+        // gets phoneme scoring.
+        guard let scorer = PhonemeScorer.ready else {
+            print("ACCENT tier-2 skipped: scorer not ready yet")
+            return
+        }
+        guard let url = engine.recordingURL else { return }
         let jobs: [(Int, String, TimeInterval, TimeInterval)] = results.indices.compactMap { index in
             let r = results[index]
             guard r.state == .spoken || r.state == .accented || r.state == .missed,
@@ -95,10 +102,20 @@ final class ReadingSession {
         guard !jobs.isEmpty else { return }
         status = .scoring
         let scored = await Task.detached(priority: .userInitiated) {
-            jobs.compactMap { index, norm, start, duration -> (Int, [PhonemeScorer.PhonemeScore])? in
-                guard let scores = scorer.score(wordNorm: norm, recording: url, start: start, duration: duration) else { return nil }
-                return (index, scores)
+            // Budget the pass: on a slow compute path, partial tier-2 beats a
+            // frozen-looking screen.
+            let deadline = Date().addingTimeInterval(12)
+            var out: [(Int, [PhonemeScorer.PhonemeScore])] = []
+            for (index, norm, start, duration) in jobs {
+                if Date() > deadline {
+                    print("ACCENT tier-2 budget hit after \(out.count)/\(jobs.count) words")
+                    break
+                }
+                if let scores = scorer.score(wordNorm: norm, recording: url, start: start, duration: duration) {
+                    out.append((index, scores))
+                }
             }
+            return out
         }.value
         for (index, scores) in scored {
             results[index].phonemeScores = scores

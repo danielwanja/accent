@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreML
 import Foundation
+import os
 
 /// Tier-2 pronunciation scoring (PLAN.md §3.3): a wav2vec2-base phoneme CTC
 /// model (Core ML, on-device) is force-aligned against the word's expected
@@ -24,8 +25,47 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         }
     }
 
-    /// Loaded once from the app bundle; nil where the model isn't bundled.
-    static let shared: PhonemeScorer? = PhonemeScorer(bundle: .main)
+    // MARK: - Background loading
+    //
+    // First load on a device includes Core ML compute-graph specialization
+    // and can take a long time. Nothing may block on it: `ready` returns nil
+    // until the load finishes (takes before that skip tier-2), and only the
+    // word card awaits `loaded()`.
+
+    private static let readyBox = OSAllocatedUnfairLock<PhonemeScorer?>(initialState: nil)
+
+    private static let loadTask: Task<PhonemeScorer?, Never> = Task.detached(priority: .utility) {
+        let started = Date()
+        let scorer = PhonemeScorer.loadWithFallback(bundle: .main)
+        readyBox.withLock { $0 = scorer }
+        let seconds = Int(-started.timeIntervalSinceNow)
+        print("ACCENT phoneme scorer \(scorer == nil ? "UNAVAILABLE" : "ready") after \(seconds)s")
+        return scorer
+    }
+
+    /// Non-blocking: nil until the background load completes.
+    static var ready: PhonemeScorer? { readyBox.withLock { $0 } }
+
+    /// Awaitable load, for callers that can wait (the word detail card).
+    static func loaded() async -> PhonemeScorer? { await loadTask.value }
+
+    /// Kick the background load without waiting.
+    static func beginLoading() { _ = loadTask }
+
+    /// Try compute units from fastest to safest, proving each with a tiny
+    /// warm-up prediction — some device backends fail only at predict time.
+    private static func loadWithFallback(bundle: Bundle) -> PhonemeScorer? {
+        guard let modelURL = bundle.url(forResource: "PhonemeRecognizer", withExtension: "mlmodelc")
+            ?? bundle.url(forResource: "PhonemeRecognizer", withExtension: "mlpackage"),
+              let labelsURL = bundle.url(forResource: "phoneme_labels", withExtension: "json") else { return nil }
+        let probe = [Float](repeating: 0, count: 4800)
+        for units in [MLComputeUnits.all, .cpuAndGPU, .cpuOnly] {
+            guard let scorer = try? PhonemeScorer(modelURL: modelURL, labelsURL: labelsURL, computeUnits: units) else { continue }
+            if scorer.logPosteriors(audio: probe) != nil { return scorer }
+            print("ACCENT phoneme scorer: compute units \(units.rawValue) failed warm-up, falling back")
+        }
+        return nil
+    }
 
     struct Labels: Decodable {
         let sample_rate: Double
@@ -42,9 +82,9 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
     /// Class ids that are real phones (competitors for the GOP margin).
     private let phoneIDs: [Int]
 
-    init(modelURL: URL, labelsURL: URL) throws {
+    init(modelURL: URL, labelsURL: URL, computeUnits: MLComputeUnits = .all) throws {
         let config = MLModelConfiguration()
-        config.computeUnits = .all
+        config.computeUnits = computeUnits
         // .mlpackage needs compiling first; .mlmodelc loads directly.
         let compiled = modelURL.pathExtension == "mlmodelc"
             ? modelURL
@@ -62,23 +102,6 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         }
         tokenID = ids
         phoneIDs = phones
-    }
-
-    /// Bundle-resource convenience (nil when the model isn't bundled).
-    convenience init?(bundle: Bundle = .main) {
-        guard let model = bundle.url(forResource: "PhonemeRecognizer", withExtension: "mlmodelc")
-            ?? bundle.url(forResource: "PhonemeRecognizer", withExtension: "mlpackage"),
-              let labels = bundle.url(forResource: "phoneme_labels", withExtension: "json"),
-              let scorer = try? PhonemeScorer(modelURL: model, labelsURL: labels) else { return nil }
-        self.init(scorer)
-    }
-
-    private init(_ other: PhonemeScorer) {
-        model = other.model
-        labels = other.labels
-        blankID = other.blankID
-        tokenID = other.tokenID
-        phoneIDs = other.phoneIDs
     }
 
     // MARK: - ARPAbet → model tokens

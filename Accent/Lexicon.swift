@@ -47,7 +47,9 @@ enum Lexicon {
             let base = phone.filter { !$0.isNumber }
             if phone.hasSuffix("1") { out += "ˈ" }
             else if phone.hasSuffix("2") { out += "ˌ" }
-            out += arpaToIPA[base] ?? base.lowercased()
+            // Unstressed AH is schwa: "the" is /ðə/, not /ðʌ/.
+            if base == "AH", phone.hasSuffix("0") { out += "ə" }
+            else { out += arpaToIPA[base] ?? base.lowercased() }
         }
         return out
     }

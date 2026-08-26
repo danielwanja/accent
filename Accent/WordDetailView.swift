@@ -64,9 +64,9 @@ struct WordDetailView: View {
                 phonemeScores = stored
                 return
             }
-            guard let scorer = PhonemeScorer.shared,
-                  let url = recordingURL,
-                  let start = result.start, let duration = result.duration else { return }
+            guard let url = recordingURL,
+                  let start = result.start, let duration = result.duration,
+                  let scorer = await PhonemeScorer.loaded() else { return }
             let norm = word.norm
             phonemeScores = await Task.detached(priority: .userInitiated) {
                 scorer.score(wordNorm: norm, recording: url, start: start, duration: duration)
