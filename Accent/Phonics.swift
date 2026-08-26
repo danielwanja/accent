@@ -96,6 +96,28 @@ enum Phonics {
         issues.first { $0.id == id }
     }
 
+    /// Minimal pairs playable in ear training: both sides must be single,
+    /// distinct, real lexicon words (so TTS can render them faithfully).
+    /// Stress and linking train production, not discrimination — excluded.
+    static func earPairs(for issue: Issue) -> [(String, String)] {
+        guard issue.id != "stress", issue.id != "linking" else { return [] }
+        return issue.minimalPairs.compactMap { pair in
+            let parts = pair.split(separator: "·").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2, !parts[0].contains(" "), !parts[1].contains(" ") else { return nil }
+            let normA = Passage.normalize(parts[0])
+            let normB = Passage.normalize(parts[1])
+            guard normA != normB,
+                  Lexicon.phones(for: normA) != nil,
+                  Lexicon.phones(for: normB) != nil else { return nil }
+            return (parts[0].lowercased(), parts[1].lowercased())
+        }
+    }
+
+    /// Issues that have at least one playable pair.
+    static var earTrainableIssues: [Issue] {
+        issues.filter { !earPairs(for: $0).isEmpty }
+    }
+
     /// Issue ids a single phoneme (stress-stripped ARPAbet) belongs to —
     /// the phone-level issues only; ed/clusters/stress/linking stay word-level.
     static func issueIDs(forPhone base: String) -> [String] {

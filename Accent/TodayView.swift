@@ -5,6 +5,7 @@ import SwiftData
 struct TodayView: View {
     @Environment(AppModel.self) private var app
     @Query(sort: \TakeRecord.date, order: .reverse) private var takes: [TakeRecord]
+    @State private var showingEarTraining = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,6 +42,16 @@ struct TodayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.paper)
+        .sheet(isPresented: $showingEarTraining) {
+            EarTrainingView()
+        }
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-showear") {
+                showingEarTraining = true
+            }
+            #endif
+        }
     }
 
     private var onboarding: some View {
@@ -51,8 +62,13 @@ struct TodayView: View {
             Text("One short passage that touches every classic French-speaker issue. It seeds your profile; every session after this is built from it.")
                 .font(.system(size: 15, design: .serif))
                 .foregroundStyle(Theme.muted)
-            actionButton("RUN DIAGNOSTIC", icon: "waveform") {
-                app.startDiagnostic()
+            HStack(spacing: 12) {
+                actionButton("RUN DIAGNOSTIC", icon: "waveform") {
+                    app.startDiagnostic()
+                }
+                actionButton("EAR TRAINING", icon: "ear") {
+                    showingEarTraining = true
+                }
             }
         }
     }
@@ -89,11 +105,16 @@ struct TodayView: View {
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(Theme.muted)
             }
-            HStack(spacing: 12) {
-                actionButton(app.isGeneratingDrill ? "PREPARING…" : "PRACTICE THIS", icon: "waveform") {
-                    app.startPractice(for: stat.issue)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    actionButton(app.isGeneratingDrill ? "PREPARING…" : "PRACTICE THIS", icon: "waveform") {
+                        app.startPractice(for: stat.issue)
+                    }
+                    .disabled(app.isGeneratingDrill)
+                    actionButton("EAR TRAINING", icon: "ear") {
+                        showingEarTraining = true
+                    }
                 }
-                .disabled(app.isGeneratingDrill)
                 actionButton("DIAGNOSTIC", icon: "stethoscope") {
                     app.startDiagnostic()
                 }

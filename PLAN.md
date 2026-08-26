@@ -189,6 +189,14 @@ big red circle.
   real-device pass. Ear-training minimal-pair tap test deferred to M4 polish.*
 - **M3 — Phoneme engine (4–6 wks, parallelizable):** Core ML phoneme model + GOP,
   per-phoneme feedback replaces heuristics, prosody/stress scoring.
+  ✅ *Done (Aug 2026): wav2vec2-base phoneme CTC → Core ML fp16 (189 MB — int8
+  rejected: it erases the subtle GOP margins; distill/palettize later against a
+  real eval set), whole-take forced alignment (own word boundaries at 20 ms + GOP
+  without window bleed), GOP bands calibrated on a synthesized substitution
+  battery (tools/calibrate.swift; /h/ marked unjudgeable), lexical stress
+  detection from per-syllable prominence (energy × duration) vs CMUdict stress.
+  Pitch-contour prosody (YIN) deferred — stress placement was the francophone
+  priority. Ear training (minimal-pair tap test, §5.2) shipped alongside.*
 - **M4 — Polish & ship:** haptics/sound design, accessibility (critical: this is a
   speech app), App Store, TestFlight cohort of francophone friends.
 
