@@ -59,11 +59,11 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         synthesizer.speak(utterance)
     }
 
-    func playSlice(recording url: URL, start: TimeInterval, duration: TimeInterval) {
+    func playSlice(recording url: URL, start: TimeInterval, duration: TimeInterval, pad: TimeInterval = 0.08) {
         stopAll()
         activatePlayback()
         do {
-            let slice = try Self.extractSlice(from: url, start: start, duration: duration)
+            let slice = try Self.extractSlice(from: url, start: start, duration: duration, pad: pad)
             let player = try AVAudioPlayer(contentsOf: slice)
             self.player = player
             player.delegate = self
@@ -82,10 +82,9 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     /// Cut the word's slice into a temp file, peak-normalized: raw mic level
     /// is far below synthesized speech, and quiet reads as muffled next to
     /// the NATIVE reference.
-    private static func extractSlice(from url: URL, start: TimeInterval, duration: TimeInterval) throws -> URL {
+    private static func extractSlice(from url: URL, start: TimeInterval, duration: TimeInterval, pad: TimeInterval) throws -> URL {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
-        let pad = 0.08
         let startFrame = AVAudioFramePosition(max(0, start - pad) * format.sampleRate)
         let frameCount = AVAudioFrameCount(max(0, min(
             Double(file.length - startFrame),

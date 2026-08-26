@@ -10,6 +10,9 @@ struct TimedWord {
     /// Seconds from the start of the session recording.
     let start: TimeInterval?
     let duration: TimeInterval?
+    /// True when start/duration were apportioned from a chunk spanning
+    /// several words — boundaries are then estimates, not measurements.
+    var estimated: Bool = false
 
     /// Removes from `incoming` whatever restates audio that `existing`
     /// already covers. The analyzer's hypotheses are cumulative from session
@@ -63,7 +66,8 @@ struct TimedWord {
         return pairs.map { token, norm in
             let share = duration * Double(norm.count) / Double(totalChars)
             defer { cursor += share }
-            return TimedWord(text: token, norm: norm, confidence: confidence, start: cursor, duration: share)
+            return TimedWord(text: token, norm: norm, confidence: confidence,
+                             start: cursor, duration: share, estimated: true)
         }
     }
 }

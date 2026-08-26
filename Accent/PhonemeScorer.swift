@@ -175,10 +175,13 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
     /// Score a word slice of the session recording against its expected
     /// phonemes. Returns nil when the word is out-of-lexicon, the audio can't
     /// be read, or alignment fails.
-    func score(wordNorm: String, recording: URL, start: TimeInterval, duration: TimeInterval) -> [PhonemeScore]? {
+    func score(wordNorm: String, recording: URL, start: TimeInterval, duration: TimeInterval, estimatedTiming: Bool = false) -> [PhonemeScore]? {
         guard let phones = Lexicon.phones(for: wordNorm) else { return nil }
+        // Estimated boundaries (apportioned multi-word chunks) get a wider
+        // window; CTC alignment tolerates leading/trailing context.
+        let pad = estimatedTiming ? 0.3 : 0.12
         guard let audio = try? Self.loadMono16k(
-            url: recording, start: max(0, start - 0.12), duration: duration + 0.24) else { return nil }
+            url: recording, start: max(0, start - pad), duration: duration + 2 * pad) else { return nil }
         return score(audio: audio, phones: phones)
     }
 

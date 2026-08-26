@@ -17,6 +17,7 @@ struct WordResult: Equatable {
     var confidence: Double? = nil
     var start: TimeInterval? = nil      // position in the session recording
     var duration: TimeInterval? = nil
+    var timingEstimated: Bool = false   // apportioned from a multi-word chunk
     /// Tier-2: per-phoneme GOP scores, filled in after the take ends.
     var phonemeScores: [PhonemeScorer.PhonemeScore]? = nil
 }
@@ -128,7 +129,8 @@ struct Passage {
                     heard: hypothesis[h].text,
                     confidence: hypothesis[h].confidence,
                     start: hypothesis[h].start,
-                    duration: hypothesis[h].duration)
+                    duration: hypothesis[h].duration,
+                    timingEstimated: hypothesis[h].estimated)
             case .sub(let p, let h):
                 let token = hypothesis[h]
                 let isLiveTail = inProgress && h == m - 1 && p == lastConsumed
@@ -140,7 +142,8 @@ struct Passage {
                         heard: token.text,
                         confidence: token.confidence,
                         start: token.start,
-                        duration: token.duration)
+                        duration: token.duration,
+                        timingEstimated: token.estimated)
                 }
             case .del(let p):
                 if p < lastConsumed { results[p].state = .missed }  // skipped over

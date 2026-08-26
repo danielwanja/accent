@@ -47,7 +47,10 @@ struct WordDetailView: View {
                 }
                 if let url = recordingURL, let start = result.start, let duration = result.duration {
                     audioButton("YOUR TAKE", icon: "waveform") {
-                        coach.playSlice(recording: url, start: start, duration: duration)
+                        // Estimated boundaries get generous context so the
+                        // word is never cut off mid-slice.
+                        coach.playSlice(recording: url, start: start, duration: duration,
+                                        pad: result.timingEstimated ? 0.25 : 0.08)
                     }
                 }
             }
@@ -70,8 +73,10 @@ struct WordDetailView: View {
             if loadedScorer == nil { loadedScorer = await PhonemeScorer.loaded() }
             guard let scorer = loadedScorer else { return }
             let norm = word.norm
+            let estimated = result.timingEstimated
             phonemeScores = await Task.detached(priority: .userInitiated) {
-                scorer.score(wordNorm: norm, recording: url, start: start, duration: duration)
+                scorer.score(wordNorm: norm, recording: url, start: start,
+                             duration: duration, estimatedTiming: estimated)
             }.value
         }
     }

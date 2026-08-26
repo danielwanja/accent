@@ -93,11 +93,11 @@ final class ReadingSession {
             return
         }
         guard let url = engine.recordingURL else { return }
-        let jobs: [(Int, String, TimeInterval, TimeInterval)] = results.indices.compactMap { index in
+        let jobs: [(Int, String, TimeInterval, TimeInterval, Bool)] = results.indices.compactMap { index in
             let r = results[index]
             guard r.state == .spoken || r.state == .accented || r.state == .missed,
                   let start = r.start, let duration = r.duration else { return nil }
-            return (index, passage.words[index].norm, start, duration)
+            return (index, passage.words[index].norm, start, duration, r.timingEstimated)
         }
         guard !jobs.isEmpty else { return }
         status = .scoring
@@ -106,12 +106,14 @@ final class ReadingSession {
             // frozen-looking screen.
             let deadline = Date().addingTimeInterval(12)
             var out: [(Int, [PhonemeScorer.PhonemeScore])] = []
-            for (index, norm, start, duration) in jobs {
+            for (index, norm, start, duration, estimated) in jobs {
                 if Date() > deadline {
                     print("ACCENT tier-2 budget hit after \(out.count)/\(jobs.count) words")
                     break
                 }
-                if let scores = scorer.score(wordNorm: norm, recording: url, start: start, duration: duration) {
+                if let scores = scorer.score(
+                    wordNorm: norm, recording: url, start: start,
+                    duration: duration, estimatedTiming: estimated) {
                     out.append((index, scores))
                 }
             }

@@ -179,6 +179,17 @@ final class SpeechEngine {
                 for try await result in transcriber.results {
                     let words = Self.timedWords(from: result.text)
                     let isFinal = result.isFinal
+                    #if DEBUG
+                    // Diagnostic ground truth for the analyzer's stream
+                    // semantics — range coverage, timing availability, text.
+                    let range = result.range
+                    let timed = words.filter { $0.start != nil }.count
+                    let exact = words.filter { $0.start != nil && !$0.estimated }.count
+                    print("ACCENT analyzer final=\(isFinal) "
+                        + "range=\(String(format: "%.2f", range.start.seconds))-\(String(format: "%.2f", range.end.seconds)) "
+                        + "words=\(words.count) timed=\(timed) exact=\(exact) "
+                        + "text=\"\(String(result.text.characters).prefix(90))\"")
+                    #endif
                     await MainActor.run {
                         onUpdate(Update(words: words, isFinal: isFinal))
                     }
