@@ -7,6 +7,7 @@ struct ReadingView: View {
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
+    @State private var lastTickedWord = -1
 
     private var session: ReadingSession { app.session }
 
@@ -26,6 +27,7 @@ struct ReadingView: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
                     .animation(.easeOut(duration: 0.18), value: session.results)
+                    .accessibilityLabel("Passage: \(session.passage.text)")
                     .environment(\.openURL, OpenURLAction { url in
                         if url.scheme == "accent", let index = Int(url.lastPathComponent),
                            session.results.indices.contains(index) {
@@ -43,6 +45,14 @@ struct ReadingView: View {
         .background(Theme.paper)
         .onChange(of: session.status) { _, status in
             if status == .finished { saveTake() }
+        }
+        .onChange(of: session.results) { _, results in
+            // Quiet haptic tick as the highlight advances to a new word.
+            guard session.isRecording,
+                  let current = results.firstIndex(where: { $0.state == .current }),
+                  current != lastTickedWord else { return }
+            lastTickedWord = current
+            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
         }
         .sheet(isPresented: $showingPicker) {
             PassagePickerView { title, text in
