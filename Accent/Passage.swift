@@ -92,22 +92,28 @@ struct Passage {
         enum Op { case match(Int, Int), sub(Int, Int), del(Int) }
         var ops: [Op] = []
         var i = n, j = m
+        // Tie-break order matters: prefer exact matches, then deletions, then
+        // substitutions. Preferring the diagonal unconditionally let a trailing
+        // half-typed token substitute onto the passage's LAST word instead of
+        // leaving unread words as deletions near the read frontier.
         while i > 0 || j > 0 {
-            if i > 0, j > 0 {
-                let isMatch = words[i - 1].norm == hypothesis[j - 1].norm
-                let diagonal = dp[i - 1][j - 1] + (isMatch ? 0 : 1)
-                if dp[i][j] == diagonal {
-                    ops.append(isMatch ? .match(i - 1, j - 1) : .sub(i - 1, j - 1))
-                    i -= 1; j -= 1
-                    continue
-                }
+            if i > 0, j > 0, words[i - 1].norm == hypothesis[j - 1].norm,
+               dp[i][j] == dp[i - 1][j - 1] {
+                ops.append(.match(i - 1, j - 1))
+                i -= 1; j -= 1
+                continue
             }
             if i > 0, dp[i][j] == dp[i - 1][j] + 1 {
                 ops.append(.del(i - 1))
                 i -= 1
-            } else {
-                j -= 1  // insertion: extra spoken token, no passage word affected
+                continue
             }
+            if i > 0, j > 0, dp[i][j] == dp[i - 1][j - 1] + 1 {
+                ops.append(.sub(i - 1, j - 1))
+                i -= 1; j -= 1
+                continue
+            }
+            j -= 1  // insertion: extra spoken token, no passage word affected
         }
         ops.reverse()
 
@@ -134,8 +140,15 @@ struct Passage {
             case .sub(let p, let h):
                 let token = hypothesis[h]
                 let isLiveTail = inProgress && h == m - 1 && p == lastConsumed
+                let isPartialWord = token.norm.count < words[p].norm.count
+                    && words[p].norm.hasPrefix(token.norm)
                 if isLiveTail && words[p].norm.hasPrefix(token.norm) {
                     results[p].state = .current  // half-recognized word still being spoken
+                } else if inProgress && isPartialWord {
+                    // The analyzer streams graphemes and can leave a half word
+                    // ("g" for "gather") mid-hypothesis until the segment
+                    // finalizes — unjudged, not missed.
+                    results[p].state = .upcoming
                 } else {
                     results[p] = WordResult(
                         state: .missed,
@@ -150,9 +163,14 @@ struct Passage {
             }
         }
 
-        if inProgress, let next = results.firstIndex(where: { $0.state == .upcoming }) {
-            // Only promote the next unread word if nothing is already marked current.
-            if !results.contains(where: { $0.state == .current }) { results[next].state = .current }
+        // Promote the next unread word to current if nothing already is —
+        // searching past the read frontier first, so an unjudged half-word
+        // behind it doesn't steal the highlight.
+        if inProgress, !results.contains(where: { $0.state == .current }) {
+            let frontier = min(lastConsumed + 1, results.count)
+            let next = results[frontier...].firstIndex { $0.state == .upcoming }
+                ?? results.firstIndex { $0.state == .upcoming }
+            if let next { results[next].state = .current }
         }
         return results
     }
