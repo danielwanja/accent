@@ -1,4 +1,5 @@
 import Foundation
+import Speech
 
 /// One recognized word, normalized across speech backends.
 struct TimedWord {
@@ -25,7 +26,8 @@ struct TimedWord {
         if let frontier, incoming.contains(where: { $0.start != nil }) {
             return incoming.filter { word in
                 guard let start = word.start else { return true }
-                return start >= frontier - 0.1
+                // Midpoints prevent short finalized words from being appended twice.
+                return start + (word.duration ?? 0) / 2 >= frontier - 0.015
             }
         }
         return trimOverlap(existing: existing, incoming: incoming)
@@ -70,4 +72,50 @@ struct TimedWord {
                              start: cursor, duration: share, estimated: true)
         }
     }
+}
+
+extension TimedWord {
+    /// Flattens an analyzer transcript into words. Each attributed run carries
+    /// an `audioTimeRange`; a run spanning several words gets its range
+    /// apportioned across them by expand().
+    static func from(transcript: AttributedString) -> [TimedWord] {
+        // Split the complete text first. Attribute runs can split a word
+        // into graphemes, which must never become separate recognized words.
+        var words: [TimedWord] = []
+        for token in transcript.characters.split(whereSeparator: \.isWhitespace) {
+            let text = String(token)
+            let norm = Passage.normalize(text)
+            guard !norm.isEmpty else { continue }
+            let ranges = transcript[token.startIndex..<token.endIndex].runs.compactMap { $0.audioTimeRange }
+            let start = ranges.map { $0.start.seconds }.min()
+            let end = ranges.map { $0.end.seconds }.max()
+            words.append(TimedWord(text: text, norm: norm, confidence: nil,
+                                   start: start, duration: start.flatMap { lo in end.map { $0 - lo } }))
+        }
+        // Shared phrase timestamps are estimates; apportion them only after
+        // recovering whole words, keeping that uncertainty for playback/scoring.
+        var cursor = 0
+        while cursor < words.count {
+            guard let groupStart = words[cursor].start, let firstDuration = words[cursor].duration else {
+                cursor += 1
+                continue
+            }
+            var groupEnd = groupStart + firstDuration
+            var end = cursor + 1
+            while end < words.count, let nextStart = words[end].start, let nextDuration = words[end].duration,
+                  nextStart < groupEnd - 0.001 {
+                groupEnd = max(groupEnd, nextStart + nextDuration)
+                end += 1
+            }
+            if end - cursor > 1 {
+                let expanded = TimedWord.expand(text: words[cursor..<end].map(\.text).joined(separator: " "),
+                                               confidence: nil, start: groupStart,
+                                               duration: groupEnd - groupStart)
+                words.replaceSubrange(cursor..<end, with: expanded)
+            }
+            cursor = end
+        }
+        return words
+    }
+
 }

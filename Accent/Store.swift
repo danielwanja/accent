@@ -5,6 +5,8 @@ import SwiftData
 struct StoredPhoneme: Codable {
     let arpa: String           // stress-stripped ARPAbet ("TH")
     let gop: Double
+    var needsPractice: Bool? = nil
+    var assessed: Bool? = nil
 }
 
 /// One word's outcome inside a saved take.
@@ -40,7 +42,11 @@ final class TakeRecord {
     }
 
     var readCount: Int { words.count }
-    var cleanCount: Int { words.filter { $0.state == "spoken" }.count }
+    var understoodCount: Int {
+        words.filter { word in
+            word.heard.map { Passage.normalize($0) == word.norm } ?? (word.state == "spoken")
+        }.count
+    }
 }
 
 /// Aggregated per-issue mastery, computed from take history.
@@ -60,30 +66,32 @@ enum IssueProfile {
         var misses: [String: Int] = [:]
         for take in takes {
             for word in take.words {
-                // With tier-2 phoneme scores, blame lands on the exact phoneme
-                // that scored badly; without them, a flagged word counts
-                // against every issue it exercises.
+                guard word.state != "uncertain",
+                      word.phonemes?.contains(where: { $0.assessed != nil }) == true else { continue }
+                // Count only assessed sounds from the current evidence policy.
+                // Keep earlier takes in history without reusing their uncalibrated
+                // scores or ASR uncertainty as sound mastery measurements.
                 var phonemeMissed: Set<String> = []
                 var phonemeJudged: Set<String> = []
                 for phoneme in word.phonemes ?? [] {
-                    // Unreliably-scored phones (e.g. /h/) fall back to
-                    // word-level attribution instead.
-                    guard !PhonemeScorer.lowConfidencePhones.contains(phoneme.arpa) else { continue }
+                    // Unreliable or unassessed sounds do not affect mastery.
+                    guard !PhonemeScorer.lowConfidencePhones.contains(phoneme.arpa),
+                          phoneme.assessed == true else { continue }
                     for id in Phonics.issueIDs(forPhone: phoneme.arpa) {
                         phonemeJudged.insert(id)
-                        if phoneme.gop <= -1.0 { phonemeMissed.insert(id) }
+                        if phoneme.needsPractice == true { phonemeMissed.insert(id) }
                     }
                 }
                 for id in Phonics.issueIDs(for: word.norm) {
-                    attempts[id, default: 0] += 1
                     let missed: Bool
                     if id == "stress", let stressOK = word.stressOK {
                         missed = !stressOK      // tier-3 measured it directly
                     } else if phonemeJudged.contains(id) {
                         missed = phonemeMissed.contains(id)
                     } else {
-                        missed = word.state != "spoken"
+                        continue // Recognition uncertainty cannot measure sound mastery.
                     }
+                    attempts[id, default: 0] += 1
                     if missed { misses[id, default: 0] += 1 }
                 }
             }

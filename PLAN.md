@@ -73,11 +73,11 @@ The recognizer outputs a hypothesis; the passage is the target. We align them:
 ASR alone is *too forgiving*: it's trained to understand accents, so "zis" often
 transcribes as "this". We layer signals:
 
-| Tier | Signal | Ships in |
-|------|--------|----------|
-| 1. Word | alignment verdict + ASR word confidence (correct word + low confidence ≈ accented) + timing anomalies | M1 |
-| 2. Phoneme | on-device Core ML phoneme recognizer (wav2vec2-style CTC, ported to Core ML) + forced alignment against expected phonemes (CMUdict lexicon) → **GOP (Goodness of Pronunciation) score per phoneme** | M3 |
-| 3. Prosody | pitch contour (autocorrelation/YIN via Accelerate), syllable stress placement, rhythm/rate vs reference | M3 |
+| Tier       | Signal                                                                                                                                                                                              | Ships in |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1. Word    | alignment verdict + ASR word confidence (correct word + low confidence ≈ accented) + timing anomalies                                                                                               | M1       |
+| 2. Phoneme | on-device Core ML phoneme recognizer (wav2vec2-style CTC, ported to Core ML) + forced alignment against expected phonemes (CMUdict lexicon) → **GOP (Goodness of Pronunciation) score per phoneme** | M3       |
+| 3. Prosody | pitch contour (autocorrelation/YIN via Accelerate), syllable stress placement, rhythm/rate vs reference                                                                                             | M3       |
 
 Tier 2 is the moat — it's how ELSA/Speechace-class products score, but ours runs
 entirely on-device. Model candidates: wav2vec2-base phoneme checkpoint distilled +
@@ -204,14 +204,14 @@ big red circle.
 
 ## 9. Risks & mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| ASR normalizes accents → misses errors | Confidence signals in M1; phoneme GOP in M3 is the real fix |
-| SpeechTranscriber confidence exposure is limited | Dual-run with SFSpeechRecognizer for segment confidence |
-| Phoneme model size/latency on ANE | Quantize + distill; score per-sentence (post-hoc), not per-frame |
-| Highlight desync on stumbles/skips | Alignment layer resyncs on anchor words; volatile-result smoothing |
-| iOS 26 / device floor excludes older phones | Accepted for v1 — the APIs are the product |
-| Over-flagging discourages users | Calibrated thresholds; show at most top-N issues per session; tone: coach, not judge |
+| Risk                                             | Mitigation                                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| ASR normalizes accents → misses errors           | Confidence signals in M1; phoneme GOP in M3 is the real fix                          |
+| SpeechTranscriber confidence exposure is limited | Dual-run with SFSpeechRecognizer for segment confidence                              |
+| Phoneme model size/latency on ANE                | Quantize + distill; score per-sentence (post-hoc), not per-frame                     |
+| Highlight desync on stumbles/skips               | Alignment layer resyncs on anchor words; volatile-result smoothing                   |
+| iOS 26 / device floor excludes older phones      | Accepted for v1 — the APIs are the product                                           |
+| Over-flagging discourages users                  | Calibrated thresholds; show at most top-N issues per session; tone: coach, not judge |
 
 ---
 

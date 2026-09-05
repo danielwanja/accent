@@ -29,6 +29,15 @@ enum Lexicon {
         }
     }
 
+    /// Weak forms and common heteronyms cannot be judged against one citation
+    /// pronunciation. Keep these neutral until context-aware variants exist.
+    static let requiresContext: Set<String> = [
+        "a", "an", "the", "and", "or", "to", "of", "for", "from", "at", "as",
+        "can", "are", "was", "were", "have", "has", "had", "do", "does", "your",
+        "read", "live", "lives", "lead", "wind", "close", "record", "present",
+        "either", "neither", "often", "route",
+    ]
+
     /// ARPAbet phones (with stress digits) for a normalized word.
     static func phones(for norm: String) -> [String]? {
         entries[norm]

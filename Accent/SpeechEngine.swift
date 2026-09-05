@@ -1,5 +1,6 @@
 import AVFoundation
 import Speech
+import os
 
 enum SpeechEngineError: LocalizedError {
     case microphoneDenied
@@ -33,6 +34,7 @@ final class SpeechEngine {
     struct Update {
         let words: [TimedWord]
         let isFinal: Bool
+        var range: Range<TimeInterval>? = nil
     }
 
     private enum Backend {
@@ -56,6 +58,7 @@ final class SpeechEngine {
     private var legacyRecognizer: SFSpeechRecognizer?
     private var legacyRequest: SFSpeechAudioBufferRecognitionRequest?
     private var legacyTask: SFSpeechRecognitionTask?
+    private let legacyFinished = OSAllocatedUnfairLock(initialState: false)
 
     // Session recording, written from the mic tap. Timestamps in TimedWord are
     // relative to the start of this file, which is what makes A/B slicing work.
@@ -104,8 +107,7 @@ final class SpeechEngine {
     func start(onUpdate: @escaping @MainActor (Update) -> Void) async throws {
         guard let backend else { throw SpeechEngineError.notPrepared }
 
-        AudioSessionController.ensureConfigured()
-        try AVAudioSession.sharedInstance().setActive(true)
+        try await AudioSessionController.shared.activate()
 
         // The input can report a 0 Hz format right after activation (mic
         // busy, device flake). Installing a tap with it crashes with an
@@ -134,15 +136,26 @@ final class SpeechEngine {
 
         inputBuilder?.finish()
         inputBuilder = nil
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        do {
+            try await analyzer?.finalizeAndFinishThroughEndOfInput()
+        } catch {
+            recognizerTask?.cancel()
+        }
         analyzer = nil       // finished analyzers are terminal — never reuse
         transcriber = nil
         analyzerFormat = nil
-        recognizerTask?.cancel()
+        await recognizerTask?.value
         recognizerTask = nil
 
         legacyRequest?.endAudio()
-        legacyTask?.finish()
+        // Let the final callback deliver words and timestamps before scoring.
+        if legacyTask != nil {
+            for _ in 0..<30 {
+                if legacyFinished.withLock({ $0 }) { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        legacyTask?.cancel()
         legacyRequest = nil
         legacyTask = nil
 
@@ -164,7 +177,7 @@ final class SpeechEngine {
             let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Recordings", isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let url = dir.appendingPathComponent("read-\(Int(Date().timeIntervalSince1970)).caf")
+            let url = dir.appendingPathComponent("read-\(UUID().uuidString).caf")
             let tapFormat = audioEngine.inputNode.outputFormat(forBus: 0)
             print("ACCENT recording format: \(Int(tapFormat.sampleRate))Hz \(tapFormat.channelCount)ch")
             recordingFile = try AVAudioFile(forWriting: url, settings: tapFormat.settings)
@@ -192,7 +205,7 @@ final class SpeechEngine {
         recognizerTask = Task {
             do {
                 for try await result in transcriber.results {
-                    let words = Self.timedWords(from: result.text)
+                    let words = TimedWord.from(transcript: result.text)
                     let isFinal = result.isFinal
                     #if DEBUG
                     // Diagnostic ground truth for the analyzer's stream
@@ -206,7 +219,8 @@ final class SpeechEngine {
                         + "text=\"\(String(result.text.characters).prefix(90))\"")
                     #endif
                     await MainActor.run {
-                        onUpdate(Update(words: words, isFinal: isFinal))
+                        onUpdate(Update(words: words, isFinal: isFinal,
+                                        range: result.range.start.seconds..<result.range.end.seconds))
                     }
                 }
             } catch {
@@ -229,22 +243,6 @@ final class SpeechEngine {
         try await analyzer.start(inputSequence: inputSequence)
     }
 
-    /// Flattens an analyzer transcript into words. Each attributed run carries
-    /// an `audioTimeRange`; a run spanning several words gets its range
-    /// apportioned across them by expand().
-    private static func timedWords(from transcript: AttributedString) -> [TimedWord] {
-        var words: [TimedWord] = []
-        for run in transcript.runs {
-            let range = run.audioTimeRange
-            words += TimedWord.expand(
-                text: String(transcript[run.range].characters),
-                confidence: nil,
-                start: range.map { $0.start.seconds },
-                duration: range.map { $0.duration.seconds })
-        }
-        return words
-    }
-
     // MARK: - SFSpeechRecognizer backend
 
     private func startLegacy(onUpdate: @escaping @MainActor (Update) -> Void) throws {
@@ -257,7 +255,8 @@ final class SpeechEngine {
         }
         legacyRequest = request
 
-        legacyTask = recognizer.recognitionTask(with: request) { result, error in
+        legacyFinished.withLock { $0 = false }
+        legacyTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             if let error { print("ACCENT sfspeech error: \(error)") }
             guard let result else { return }
             if result.isFinal {
@@ -279,6 +278,7 @@ final class SpeechEngine {
             let isFinal = result.isFinal
             Task { @MainActor in
                 onUpdate(Update(words: words, isFinal: isFinal))
+                if isFinal { self?.legacyFinished.withLock { $0 = true } }
             }
         }
 

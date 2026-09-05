@@ -7,7 +7,6 @@ struct ReadingView: View {
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
-    @State private var lastTickedWord = -1
 
     private var session: ReadingSession { app.session }
 
@@ -49,6 +48,9 @@ struct ReadingView: View {
             #if DEBUG
             // "-showword N" opens word N's card once the take finishes.
             let args = ProcessInfo.processInfo.arguments
+            if args.contains("-testWordDetails") {
+                selectedWord = SelectedWord(id: 0)
+            }
             if let index = args.firstIndex(of: "-showword"), index + 1 < args.count,
                let wordIndex = Int(args[index + 1]) {
                 Task { @MainActor in
@@ -67,12 +69,14 @@ struct ReadingView: View {
                 withAnimation { selectedWord = nil }
             }
         }
-        .onChange(of: session.results) { _, results in
-            // Quiet haptic tick as the highlight advances to a new word.
-            guard session.isRecording,
-                  let current = results.firstIndex(where: { $0.state == .current }),
-                  current != lastTickedWord else { return }
-            lastTickedWord = current
+        .task(id: currentWord) {
+            guard session.isRecording, currentWord != nil else { return }
+            // Coalesce bursty transcript updates outside SwiftUI's render pass.
+            // sensoryFeedback also uses onChange internally and emitted a
+            // multiple-updates-per-frame warning for this stream.
+            do { try await Task.sleep(for: .milliseconds(60)) }
+            catch { return }
+            guard !Task.isCancelled, session.isRecording else { return }
             UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
         }
         .sheet(isPresented: $showingPicker) {
@@ -80,54 +84,39 @@ struct ReadingView: View {
                 session.load(title: title, text: text)
             }
         }
-        // Custom bottom card instead of a sheet: SwiftUI's sheet kept
-        // misbehaving here (detents dropped on item swap, empty content on
-        // first present). An overlay swaps words instantly and leaves the
-        // passage tappable above it.
-        .overlay(alignment: .bottom) {
-            if let selected = selectedWord, session.results.indices.contains(selected.id) {
-                wordCard(for: selected)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+        .sheet(item: $selectedWord) { selected in
+            if session.results.indices.contains(selected.id) {
+                NavigationStack {
+                    WordDetailView(
+                        word: session.passage.words[selected.id],
+                        result: session.results[selected.id],
+                        recordingURL: session.recordingURL)
+                        .id(selected.id)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button {
+                                    selectedWord = nil
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("Close word details")
+                                .accessibilityIdentifier("closeWordDetails")
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.paper)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             }
         }
     }
 
-    /// The word detail card, presented as an editorial bottom panel.
-    private func wordCard(for selected: SelectedWord) -> some View {
-        WordDetailView(
-            word: session.passage.words[selected.id],
-            result: session.results[selected.id],
-            recordingURL: session.recordingURL)
-            .id(selected.id)  // fresh card state (scores, audio) per word
-            // Hug the content (a stress line can lengthen it) and keep the
-            // buttons clear of the floating tab bar.
-            .padding(.bottom, 64)
-            .frame(maxWidth: .infinity)
-            .background(Theme.paper)
-            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
-            .overlay(alignment: .top) {
-                UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
-                    .stroke(Theme.line, lineWidth: 1)
-            }
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    withAnimation(.spring(duration: 0.3)) { selectedWord = nil }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close word details")
-            }
-            .shadow(color: .black.opacity(0.14), radius: 18, y: -4)
-            .gesture(
-                DragGesture(minimumDistance: 20).onEnded { value in
-                    if value.translation.height > 40 {
-                        withAnimation(.spring(duration: 0.3)) { selectedWord = nil }
-                    }
-                })
+    private var currentWord: Int? {
+        session.results.firstIndex { $0.state == .current }
     }
 
     /// Persist a finished take — only the words that were actually read.
@@ -138,12 +127,13 @@ struct ReadingView: View {
             case .spoken: state = "spoken"
             case .accented: state = "accented"
             case .missed: state = "missed"
+            case .uncertain: state = "uncertain"
             case .upcoming, .current: return nil
             }
             return StoredWord(
                 display: word.display, norm: word.norm, state: state,
                 heard: result.heard, confidence: result.confidence,
-                phonemes: result.phonemeScores?.map { StoredPhoneme(arpa: $0.arpa, gop: $0.gop) },
+                phonemes: result.phonemeScores?.map { StoredPhoneme(arpa: $0.arpa, gop: $0.gop, needsPractice: $0.needsPractice, assessed: $0.isAssessed) },
                 stressOK: result.stressCheck?.ok)
         }
         guard !stored.isEmpty else { return }
@@ -177,7 +167,7 @@ struct ReadingView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Choose passage")
-            .disabled(session.isRecording)
+            .disabled(session.isBusy)
         }
         .padding(.horizontal, 28)
         .padding(.top, 24)
@@ -203,6 +193,9 @@ struct ReadingView: View {
             case .accented:
                 piece.foregroundColor = Theme.ink
                 piece.underlineStyle = Text.LineStyle(pattern: .solid, color: Theme.amber)
+            case .uncertain:
+                piece.foregroundColor = Theme.ink
+                if tappable { piece.underlineStyle = Text.LineStyle(pattern: .dot, color: Theme.muted) }
             case .missed:
                 piece.foregroundColor = Theme.ink
                 piece.underlineStyle = Text.LineStyle(pattern: .solid, color: Theme.accent)
@@ -232,9 +225,12 @@ struct ReadingView: View {
         switch session.status {
         case .idle: return "TAP RECORD, THEN READ THE PASSAGE ALOUD"
         case .preparing: return "PREPARING SPEECH MODEL…"
-        case .listening: return "LISTENING"
+        case .listening: return "LISTENING — FOLLOW THE HIGHLIGHT"
         case .scoring: return "SCORING PHONEMES…"
-        case .finished: return "DONE — TAP ANY WORD FOR DETAILS"
+        case .finished:
+            return session.scoringAvailable
+                ? "AMBER: PRACTICE · DOTTED: CHECK AUDIO\nTAP A WORD FOR GUIDANCE"
+                : "WORDS CHECKED · SOUND ASSESSMENT UNAVAILABLE\nTAP A WORD TO LISTEN AND PRACTICE"
         case .failed(let message): return message.uppercased()
         }
     }
@@ -283,7 +279,7 @@ struct ReadingView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Reset")
-            .disabled(session.isRecording)
+            .disabled(session.isBusy)
         }
         .padding(.bottom, 40)
     }

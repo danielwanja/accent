@@ -10,7 +10,16 @@ struct AccentApp: App {
             RootView()
                 .environment(app)
         }
-        .modelContainer(for: TakeRecord.self)
+        .modelContainer(for: TakeRecord.self, inMemory: isTestLaunch)
+    }
+
+    private var isTestLaunch: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-audioSmokeTest")
+            || ProcessInfo.processInfo.arguments.contains("-testWordDetails")
+        #else
+        return false
+        #endif
     }
 }
 
@@ -33,6 +42,16 @@ struct RootView: View {
         }
         .tint(Theme.accent)
         .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-audioSmokeTest") {
+                Task { await AudioCoach.runPlaybackSmokeTest() }
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("-testWordDetails") {
+                app.tab = .read
+                return
+            }
+            #endif
             Lexicon.warmUp()
             PhonemeScorer.beginLoading()  // logs readiness when done; nothing blocks on it
             handleLaunchArguments()

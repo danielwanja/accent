@@ -22,14 +22,13 @@ final class ReadingSession {
     var isRecording: Bool { status == .listening }
     var recordingURL: URL? { engine.recordingURL }
 
-    // Tier-1 scoring: a matched word whose ASR confidence falls below this is
-    // marked "accented" — right word, but the recognizer had to squint.
-    private let accentedThreshold = 0.45
-
     private let engine = SpeechEngine()
     private var prepared = false
-    private var finalizedWords: [TimedWord] = []
-    private var volatileWords: [TimedWord] = []
+    private var transcript = TranscriptBuffer()
+    private var takeID = UUID()
+    private var acceptingUpdates = false
+    var isBusy: Bool { status == .preparing || status == .listening || status == .scoring }
+    private(set) var scoringAvailable = false
 
     init() {
         let first = PassageLibrary.curated[0]
@@ -40,7 +39,7 @@ final class ReadingSession {
     }
 
     func load(title: String, text: String) {
-        guard !isRecording else { return }
+        guard !isBusy else { return }
         passage = Passage(text: text)
         passageTitle = title
         reset()
@@ -55,151 +54,118 @@ final class ReadingSession {
     }
 
     func start() async {
-        guard status != .preparing else { return }
+        guard !isBusy else { return }
         status = .preparing
         reset(keepStatus: true)
+        let id = takeID
+        acceptingUpdates = true
         do {
             if !prepared {
                 try await engine.prepare()
                 prepared = true
             }
             try await engine.start { [weak self] update in
+                guard self?.takeID == id else { return }
                 self?.apply(update)
             }
-            if !results.isEmpty { results[0].state = .current }
             status = .listening
+            realign(inProgress: true)
         } catch {
+            await engine.stop()
+            acceptingUpdates = false
             status = .failed(error.localizedDescription)
         }
     }
 
     func stop() async {
+        guard isRecording else { return }
+        status = .scoring
         await engine.stop()
+        acceptingUpdates = false
         // Final pass: no in-progress word, trailing words stay upcoming.
         realign(inProgress: false)
         await scorePhonemes()
         status = .finished
     }
 
-    /// Tier-2 pass: GOP-score each read word's audio slice and let strong
-    /// phoneme evidence upgrade the word verdict — this is what catches the
-    /// substitutions ASR normalizes away ("zis" transcribed as "this").
+    /// Score bounded chunks of the actual transcript, including repetitions
+    /// and inserted words. Never force omitted passage words into the audio.
     private func scorePhonemes() async {
-        // Never wait for the model: if the background load hasn't finished
-        // (first device launch), this take stays tier-1 and the next one
-        // gets phoneme scoring.
-        guard let scorer = PhonemeScorer.ready else {
-            print("ACCENT tier-2 skipped: scorer not ready yet")
-            return
-        }
-        guard let url = engine.recordingURL else { return }
-        let readIndices = results.indices.filter { index in
-            let state = results[index].state
-            return state == .spoken || state == .accented || state == .missed
-        }
-        guard !readIndices.isEmpty else { return }
-        status = .scoring
-
-        // One forced-alignment pass over the whole recording: our own word
-        // boundaries at 20 ms precision (the recognizer's timestamps are
-        // loose) and per-phoneme GOP without window bleed from neighbors.
-        let wordPhones = readIndices.map { Lexicon.phones(for: passage.words[$0].norm) ?? [] }
-        let aligned = await Task.detached(priority: .userInitiated) {
-            scorer.scoreUtterance(recording: url, wordPhones: wordPhones)
-        }.value
-
-        if let aligned {
-            for (position, alignment) in aligned.enumerated() {
-                guard let alignment else { continue }
-                let index = readIndices[position]
-                results[index].start = alignment.start
-                results[index].duration = alignment.duration
-                results[index].timingEstimated = false
-                results[index].phonemeScores = alignment.scores
-                results[index].stressCheck = alignment.stress
-                applyTier2Verdict(at: index, scores: alignment.scores)
-                // Misplaced stress alone makes a word "accented", never "missed".
-                if results[index].state == .spoken, alignment.stress?.ok == false {
-                    results[index].state = .accented
-                }
-            }
-            return
-        }
-
-        // Fallback: per-word windows from the recognizer's timestamps.
-        print("ACCENT tier-2 whole-take alignment unavailable; falling back to word windows")
-        let jobs: [(Int, String, TimeInterval, TimeInterval, Bool)] = readIndices.compactMap { index in
-            let r = results[index]
-            guard let start = r.start, let duration = r.duration else { return nil }
-            return (index, passage.words[index].norm, start, duration, r.timingEstimated)
-        }
+        guard let scorer = PhonemeScorer.ready, let url = engine.recordingURL else { return }
+        let spoken = transcript.words
+        let snapshot = results
+        let passageWords = passage.words
+        let id = takeID
         let scored = await Task.detached(priority: .userInitiated) {
-            let deadline = Date().addingTimeInterval(12)
-            var out: [(Int, [PhonemeScorer.PhonemeScore])] = []
-            for (index, norm, start, duration, estimated) in jobs {
-                if Date() > deadline {
-                    print("ACCENT tier-2 budget hit after \(out.count)/\(jobs.count) words")
-                    break
+            var output: [Int: PhonemeScorer.WordAlignment] = [:]
+            var cursor = 0
+            while cursor < spoken.count {
+                let first = cursor
+                guard let start = spoken[first].start else { cursor += 1; continue }
+                var end = start
+                while cursor < spoken.count,
+                      let wordStart = spoken[cursor].start,
+                      let duration = spoken[cursor].duration, duration > 0,
+                      wordStart + duration - start <= 12 {
+                    end = wordStart + duration
+                    cursor += 1
                 }
-                if let scores = scorer.score(
-                    wordNorm: norm, recording: url, start: start,
-                    duration: duration, estimatedTiming: estimated) {
-                    out.append((index, scores))
+                guard cursor > first else { cursor += 1; continue }
+                let chunk = Array(spoken[first..<cursor])
+                let phones = chunk.map { Lexicon.phones(for: $0.norm) ?? [] }
+                // Unknown words cannot be silently removed from a forced path.
+                guard phones.allSatisfy({ !$0.isEmpty }) else { continue }
+                let windowStart = max(0, start - 0.12)
+                guard let aligned = scorer.scoreUtterance(recording: url, wordPhones: phones,
+                                                          start: windowStart, duration: end - windowStart + 0.12) else { continue }
+                for index in snapshot.indices {
+                    guard let h = snapshot[index].hypothesisIndex, (first..<cursor).contains(h),
+                          spoken[h].norm == passageWords[index].norm,
+                          let alignment = aligned[h - first],
+                          let asrStart = spoken[h].start, let asrDuration = spoken[h].duration else { continue }
+                    let tolerance = spoken[h].estimated ? 0.6 : 0.3
+                    // Keep suspect boundaries out of both scoring and word playback.
+                    guard alignment.duration >= 0.06,
+                          alignment.start >= asrStart - tolerance,
+                          alignment.start + alignment.duration <= asrStart + asrDuration + tolerance else { continue }
+                    output[index] = alignment
                 }
             }
-            return out
+            return output
         }.value
-        for (index, scores) in scored {
-            results[index].phonemeScores = scores
-            applyTier2Verdict(at: index, scores: scores)
-        }
-    }
-
-    /// Upgrade only — tier 2 can worsen a verdict, never absolve one. With
-    /// forced-alignment boundaries the windows are precise, so word verdicts
-    /// use the same bands as the phoneme chips.
-    private func applyTier2Verdict(at index: Int, scores: [PhonemeScorer.PhonemeScore]) {
-        guard results[index].state == .spoken else { return }
-        // Low-confidence phones (e.g. /h/) never convict a word on their own.
-        let reliable = scores.filter { !PhonemeScorer.lowConfidencePhones.contains($0.arpa) }
-        guard let worst = reliable.map(\.gop).min() else { return }
-        switch PhonemeScorer.Verdict(gop: worst) {
-        case .missed: results[index].state = .missed
-        case .accented: results[index].state = .accented
-        case .clean: break
+        guard id == takeID else { return }
+        for (index, alignment) in scored {
+            results[index].start = alignment.start
+            results[index].duration = alignment.duration
+            results[index].timingEstimated = false
+            // Reduced function words and ambiguous dictionary entries need
+            // context-sensitive pronunciation variants before judging them.
+            guard !Lexicon.requiresContext.contains(passage.words[index].norm) else { continue }
+            results[index].phonemeScores = alignment.scores
+            scoringAvailable = scoringAvailable || alignment.scores.contains { $0.isAssessed }
+            // Energy × duration alone isn't reliable evidence of lexical stress.
+            // Keep expected stress in the phone display, without penalizing it.
+            results[index].state = alignment.scores.contains(where: \.needsPractice) ? .accented : .spoken
         }
     }
 
     func reset(keepStatus: Bool = false) {
-        finalizedWords = []
-        volatileWords = []
+        guard keepStatus || !isBusy else { return }
+        takeID = UUID()
+        acceptingUpdates = false
+        transcript = TranscriptBuffer()
+        scoringAvailable = false
         results = [WordResult](repeating: WordResult(), count: passage.words.count)
         if !keepStatus { status = .idle }
     }
 
     private func apply(_ update: SpeechEngine.Update) {
-        if update.isFinal {
-            // An empty final means the recognizer reset without committing —
-            // promote the volatile hypothesis rather than losing it.
-            finalizedWords += update.words.isEmpty
-                ? volatileWords
-                : TimedWord.dedup(existing: finalizedWords, incoming: update.words)
-            volatileWords = []
-        } else {
-            // Analyzer volatiles restate (and revise) already-finalized audio.
-            volatileWords = TimedWord.dedup(existing: finalizedWords, incoming: update.words)
-        }
+        guard acceptingUpdates else { return }
+        transcript.apply(words: update.words, isFinal: update.isFinal, range: update.range)
         realign(inProgress: isRecording)
     }
 
     private func realign(inProgress: Bool) {
-        results = passage.align(hypothesis: finalizedWords + volatileWords, inProgress: inProgress)
-        if !inProgress {
-            for index in results.indices where results[index].state == .spoken {
-                if let confidence = results[index].confidence, confidence < accentedThreshold {
-                    results[index].state = .accented
-                }
-            }
-        }
+        results = passage.align(hypothesis: transcript.words, inProgress: inProgress)
     }
 }

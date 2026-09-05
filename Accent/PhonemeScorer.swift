@@ -5,14 +5,30 @@ import os
 
 /// Tier-2 pronunciation scoring (PLAN.md §3.3): a wav2vec2-base phoneme CTC
 /// model (Core ML, on-device) is force-aligned against the word's expected
-/// CMUdict phonemes, yielding a GOP (Goodness of Pronunciation) score per
-/// phoneme. GOP ≤ 0; near 0 means the model heard exactly that phoneme,
-/// strongly negative means it heard something else.
+/// CMUdict phonemes. Peak posterior margins compare the expected sound
+/// with a confident competitor, without treating CTC blanks as errors.
+/// These are practice signals, not calibrated pronunciation probabilities.
 final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLModel prediction is thread-safe
     struct PhonemeScore: Equatable {
         let arpa: String     // expected phone, stress stripped ("TH")
         let ipa: String      // display form ("θ")
-        let gop: Double      // mean aligned log-posterior margin, ≤ 0
+        let gop: Double      // peak log-posterior margin, ≤ 0; needs evidence to interpret
+        var evidenceFrames: Int = 0
+        var competingIPA: String? = nil
+        var isAssessed: Bool {
+            guard evidenceFrames > 0, !PhonemeScorer.lowConfidencePhones.contains(arpa) else { return false }
+            // A vowel aligned to a neighboring consonant (or vice versa) is
+            // suspect timing, not enough evidence for an articulation correction.
+            if gop <= -3, let competingIPA {
+                return Lexicon.vowels.contains(arpa) == PhonemeScorer.vowelTokens.contains(competingIPA)
+            }
+            return true
+        }
+        /// Require a confident competing sound before offering correction.
+        var needsPractice: Bool {
+            isAssessed && gop <= -3 && competingIPA != nil
+
+        }
         var stressed: Bool = false   // carries the word's primary stress
     }
 
@@ -26,31 +42,19 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         var ok: Bool { expectedSyllable == detectedSyllable }
     }
 
-    /// GOP verdict bands, calibrated on a synthesized substitution battery
-    /// (tools/calibrate.swift, 2026-08-26): clean median 0.00; hard
-    /// substitutions (θ←s/t, ɪ-for-iː) land below -4; near-neighbors
-    /// (θ←f, ð←z) between -1 and -4.
-    enum Verdict {
-        case clean, accented, missed
-        init(gop: Double) {
-            if gop > -1.0 { self = .clean }
-            else if gop > -4.0 { self = .accented }
-            else { self = .missed }
-        }
-    }
-
     /// Phones whose GOP the model can't judge reliably (same battery: clean
     /// "hair" scored -5 while dropped-h "air" scored 0 — breathy vowel
     /// onsets and /h/ are acoustically interchangeable to it). They never
-    /// drive word verdicts and cap at "accented" in the chips.
+    /// drive word verdicts or colored sound chips.
     static let lowConfidencePhones: Set<String> = ["HH"]
+    private static let vowelTokens: Set<String> = Set(
+        Lexicon.vowels.flatMap { modelTokens(forArpa: $0) } + ["ə", "ɪə", "eə", "ʊə"])
 
     // MARK: - Background loading
     //
     // First load on a device includes Core ML compute-graph specialization
     // and can take a long time. Nothing may block on it: `ready` returns nil
-    // until the load finishes (takes before that skip tier-2), and only the
-    // word card awaits `loaded()`.
+    // until the load finishes (takes before that show recognition only).
 
     private static let readyBox = OSAllocatedUnfairLock<PhonemeScorer?>(initialState: nil)
 
@@ -66,7 +70,7 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
             print("ACCENT phoneme scorer UNAVAILABLE: model not bundled")
             return nil
         }
-        let probe = [Float](repeating: 0, count: 4800)
+        let probe = (0..<4800).map { Float(sin(Double($0) * 0.08)) * 0.01 }
         let started = Date()
         var current: PhonemeScorer?
         if let cpu = try? PhonemeScorer(modelURL: modelURL, labelsURL: labelsURL, computeUnits: .cpuOnly),
@@ -130,7 +134,7 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         var phones: [Int] = []
         for (id, token) in labels.labels.enumerated() {
             ids[token] = id
-            if !["[PAD]", "[UNK]", " ", "<s>", "</s>"].contains(token) {
+            if !["[PAD]", "[UNK]", " ", "|", "<s>", "</s>"].contains(token) {
                 phones.append(id)
             }
         }
@@ -163,8 +167,8 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         case "F": return ["f"]
         case "G": return ["ɡ"]
         case "HH": return ["h"]
-        case "IH": return ["ɪ"]
-        case "IY": return ["i"]
+        case "IH": return stress == "0" ? ["ɪ", "ə"] : ["ɪ"]
+        case "IY": return stress == "0" ? ["i", "ɪ"] : ["i"]
         case "JH": return ["d͡ʒ"]
         case "K": return ["k"]
         case "L": return ["l"]
@@ -202,15 +206,15 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
     /// wav2vec2's frame stride: 320 samples at 16 kHz.
     private static let frameDuration = 0.02
 
-    /// One pass over the whole take: force-align the expected phone sequence
+    /// One pass over a bounded audio window: align the transcript phone sequence
     /// of every read word against the full recording. Yields per-word
     /// boundaries at 20 ms precision — the recognizer's word timestamps are
     /// recognition times, not phonetic boundaries, and cut into neighbors —
-    /// plus per-phoneme GOP from the same alignment. Entries with empty
+    /// plus per-phoneme evidence from the same alignment. Entries with empty
     /// phone lists (out-of-lexicon words) come back nil.
-    func scoreUtterance(recording: URL, wordPhones: [[String]]) -> [WordAlignment?]? {
+    func scoreUtterance(recording: URL, wordPhones: [[String]], start: TimeInterval = 0, duration: TimeInterval = 20) -> [WordAlignment?]? {
         guard wordPhones.contains(where: { !$0.isEmpty }) else { return nil }
-        guard let audio = try? Self.loadMono16k(url: recording, start: 0, duration: 600),
+        guard let audio = try? Self.loadMono16k(url: recording, start: start, duration: duration),
               audio.count >= 1600 else { return nil }
 
         var flat: [[Int]] = []
@@ -252,25 +256,17 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         for (position, frames) in assignment.enumerated() {
             let wordIndex = owner[position]
             let ids = flat[position]
-            var gopSum = 0.0
             var energySum = 0.0
             for frame in frames {
-                let row = logProbs[frame]
-                let target = ids.map { row[$0] }.max() ?? -Double.infinity
-                let best = phoneIDs.map { row[$0] }.max() ?? 0
-                gopSum += target - best
                 energySum += rms[frame]
                 firstFrame[wordIndex] = min(firstFrame[wordIndex], frame)
                 lastFrame[wordIndex] = max(lastFrame[wordIndex], frame)
             }
-            let gop = frames.isEmpty ? -10.0 : gopSum / Double(frames.count)
             let phone = phoneLabel[position]
             let base = phone.filter { !$0.isNumber }
-            scores[wordIndex].append(PhonemeScore(
-                arpa: base,
-                ipa: Lexicon.ipa(forPhone: phone),
-                gop: gop,
-                stressed: phone.hasSuffix("1")))
+            var evidence = acousticScore(phone: phone, frames: Self.evidenceWindow(at: position, assignment: assignment, frameCount: logProbs.count), ids: ids, logProbs: logProbs)
+            evidence.stressed = phone.hasSuffix("1")
+            scores[wordIndex].append(evidence)
             if Lexicon.vowels.contains(base) {
                 // Prominence = total energy over the vowel's frames — louder
                 // AND longer both push it up, which is what stress is.
@@ -280,8 +276,8 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
 
         return wordPhones.indices.map { wordIndex in
             guard lastFrame[wordIndex] >= 0 else { return nil }
-            let start = Double(firstFrame[wordIndex]) * Self.frameDuration
-            let end = Double(lastFrame[wordIndex] + 1) * Self.frameDuration
+            let wordStart = start + Double(firstFrame[wordIndex]) * Self.frameDuration
+            let end = start + Double(lastFrame[wordIndex] + 1) * Self.frameDuration
 
             var stress: StressCheck?
             let vowels = vowelProminence[wordIndex]
@@ -295,7 +291,7 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
                     syllableCount: vowels.count)
             }
             return WordAlignment(
-                start: start, duration: end - start,
+                start: wordStart, duration: end - wordStart,
                 scores: scores[wordIndex], stress: stress)
         }
     }
@@ -333,25 +329,51 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
             logProbs: logProbs, candidates: candidates, blankID: blankID) else { return nil }
 
         return phones.enumerated().map { index, phone in
-            let ownFrames = assignment[index]
-            let ids = candidates[index]
-            var gopSum = 0.0
-            for frame in ownFrames {
-                let row = logProbs[frame]
-                let target = ids.map { row[$0] }.max() ?? -Double.infinity
-                let best = phoneIDs.map { row[$0] }.max() ?? 0
-                gopSum += target - best
-            }
-            let gop = ownFrames.isEmpty ? -10.0 : gopSum / Double(ownFrames.count)
-            return PhonemeScore(
-                arpa: phone.filter { !$0.isNumber },
-                ipa: Lexicon.ipa(forPhone: phone),
-                gop: gop)
+            acousticScore(phone: phone, frames: Self.evidenceWindow(at: index, assignment: assignment, frameCount: logProbs.count), ids: candidates[index], logProbs: logProbs)
         }
+    }
+
+    /// Include the blank interval around each aligned phone. CTC commonly
+    /// emits a real sound on just ONE frame; counting frames penalizes fast
+    /// speech, while forced frames alone can miss a substituted consonant.
+    static func evidenceWindow(at index: Int, assignment: [[Int]], frameCount: Int) -> [Int] {
+        guard let first = assignment[index].first, let last = assignment[index].last else { return [] }
+        let lower = index == 0 ? 0 : ((assignment[index - 1].last ?? first) + first) / 2 + 1
+        let upper = index + 1 == assignment.count ? frameCount : (last + (assignment[index + 1].first ?? last)) / 2 + 1
+        return Array(max(0, lower)..<min(frameCount, max(lower, upper)))
+    }
+
+    /// Compare posterior peaks, rather than averaging blank-dominated frames.
+    /// A strong expected peak wins even if nearby transition frames differ.
+    private func acousticScore(phone: String, frames: [Int], ids: [Int], logProbs: [[Double]]) -> PhonemeScore {
+        var targetPeak = -Double.infinity
+        var bestPeak = -Double.infinity
+        var competitor: Int?
+        var evidenceFrames = 0
+        for frame in frames {
+            let row = logProbs[frame]
+            targetPeak = max(targetPeak, ids.map { row[$0] }.max() ?? -.infinity)
+            guard let best = phoneIDs.max(by: { row[$0] < row[$1] }) else { continue }
+            // Blank probability measures CTC emission timing, not pronunciation
+            // quality. Require both real acoustic mass and a clear phone winner.
+            let phoneMass = phoneIDs.reduce(0.0) { $0 + exp(row[$1]) }
+            guard row[best] >= log(0.1), exp(row[best]) / max(phoneMass, 1e-12) >= 0.8 else { continue }
+            evidenceFrames += 1
+            if row[best] > bestPeak {
+                bestPeak = row[best]
+                competitor = ids.contains(best) ? nil : best
+            }
+        }
+        let margin = bestPeak.isFinite ? min(0, targetPeak - bestPeak) : 0
+        return PhonemeScore(arpa: phone.filter { !$0.isNumber }, ipa: Lexicon.ipa(forPhone: phone),
+                            gop: margin, evidenceFrames: evidenceFrames,
+                            competingIPA: competitor.map { labels.labels[$0] })
     }
 
     /// Run the model and return per-frame log-softmax rows.
     private func logPosteriors(audio: [Float]) -> [[Double]]? {
+        guard !audio.isEmpty, audio.allSatisfy(\.isFinite),
+              audio.reduce(0.0, { $0 + Double($1) * Double($1) }) / Double(audio.count) > 1e-6 else { return nil }
         var samples = audio
         if labels.do_normalize {
             let mean = samples.reduce(0, +) / Float(samples.count)
@@ -386,6 +408,11 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
     /// CTC Viterbi forced alignment. Returns, per phone, the frames assigned
     /// to it. States alternate blank/phone: [b, p0, b, p1, …, b].
     static func align(logProbs: [[Double]], candidates: [[Int]], blankID: Int) -> [[Int]]? {
+        guard !logProbs.isEmpty, !candidates.isEmpty,
+              candidates.allSatisfy({ !$0.isEmpty }),
+              logProbs.allSatisfy({ row in
+                  row.indices.contains(blankID) && candidates.joined().allSatisfy { row.indices.contains($0) }
+              }) else { return nil }
         let frameCount = logProbs.count
         let phoneCount = candidates.count
         let stateCount = 2 * phoneCount + 1
@@ -442,6 +469,10 @@ final class PhonemeScorer: @unchecked Sendable {  // immutable after init; MLMod
         let file = try AVAudioFile(forReading: url)
         let sourceFormat = file.processingFormat
         let sourceRate = sourceFormat.sampleRate
+        guard start.isFinite, duration.isFinite, duration > 0, sourceRate > 0,
+              max(0, start) < Double(file.length) / sourceRate else {
+            throw NSError(domain: "PhonemeScorer", code: 1)
+        }
         let startFrame = AVAudioFramePosition(max(0, start) * sourceRate)
         let frameCount = AVAudioFrameCount(min(
             Double(file.length - startFrame),

@@ -141,7 +141,7 @@ struct TodayView: View {
     private var lastTakeLine: some View {
         Group {
             if let last = takes.first {
-                Text("Last read: \(last.passageTitle) — \(last.cleanCount)/\(last.readCount) clean, \(last.date.formatted(.relative(presentation: .named)))")
+                Text("Last read: \(last.passageTitle) — \(last.understoodCount)/\(last.readCount) understood, \(last.date.formatted(.relative(presentation: .named)))")
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .kerning(0.5)
                     .foregroundStyle(Theme.muted)

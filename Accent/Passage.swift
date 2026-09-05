@@ -4,23 +4,25 @@ import Foundation
 enum WordState: Equatable {
     case upcoming   // not reached yet — faded
     case current    // being spoken now — amber wash
-    case spoken     // matched cleanly — ink
-    case accented   // matched, but low ASR confidence — amber underline
-    case missed     // mispronounced, substituted, or skipped — red underline
+    case spoken     // word understood; sound assessment is separate
+    case accented   // supported sound difference — amber underline
+    case missed     // reserved for confirmed pronunciation errors
+    case uncertain  // transcription mismatch or omission; not a pronunciation verdict
 }
 
 /// What happened to one passage word during a reading — display state plus the
 /// evidence behind it, which feeds the word detail card.
 struct WordResult: Equatable {
     var state: WordState = .upcoming
+    var hypothesisIndex: Int? = nil
     var heard: String? = nil            // recognized token this word aligned to
     var confidence: Double? = nil
     var start: TimeInterval? = nil      // position in the session recording
     var duration: TimeInterval? = nil
     var timingEstimated: Bool = false   // apportioned from a multi-word chunk
-    /// Tier-2: per-phoneme GOP scores, filled in after the take ends.
+    /// Sound evidence, filled in after the take ends.
     var phonemeScores: [PhonemeScorer.PhonemeScore]? = nil
-    /// Tier-3: lexical stress placement for multi-syllable words.
+    /// Retained for compatibility; duration/energy stress guesses no longer judge words.
     var stressCheck: PhonemeScorer.StressCheck? = nil
 }
 
@@ -69,6 +71,7 @@ struct Passage {
     /// treated as in-progress rather than missed.
     func align(hypothesis: [TimedWord], inProgress: Bool) -> [WordResult] {
         var results = [WordResult](repeating: WordResult(), count: words.count)
+        guard !words.isEmpty else { return results }
         guard !hypothesis.isEmpty else {
             if inProgress, !words.isEmpty { results[0].state = .current }
             return results
@@ -93,7 +96,15 @@ struct Passage {
         // Backtrace, preferring matches, and record what happened to each passage word.
         enum Op { case match(Int, Int), sub(Int, Int), del(Int) }
         var ops: [Op] = []
-        var i = n, j = m
+        // Unread suffixes are free: choose the best passage PREFIX. A global
+        // alignment rewards matching repeated words at the end of the passage.
+        // On ties stay near the amount actually spoken, then prefer earlier.
+        let endpoint = (0...n).min {
+            if dp[$0][m] != dp[$1][m] { return dp[$0][m] < dp[$1][m] }
+            if abs($0 - m) != abs($1 - m) { return abs($0 - m) < abs($1 - m) }
+            return $0 < $1
+        } ?? 0
+        var i = endpoint, j = m
         // Tie-break order matters: prefer exact matches, then deletions, then
         // substitutions. Preferring the diagonal unconditionally let a trailing
         // half-typed token substitute onto the passage's LAST word instead of
@@ -134,6 +145,7 @@ struct Passage {
             case .match(let p, let h):
                 results[p] = WordResult(
                     state: .spoken,
+                    hypothesisIndex: h,
                     heard: hypothesis[h].text,
                     confidence: hypothesis[h].confidence,
                     start: hypothesis[h].start,
@@ -153,7 +165,8 @@ struct Passage {
                     results[p].state = .upcoming
                 } else {
                     results[p] = WordResult(
-                        state: .missed,
+                        state: .uncertain,
+                        hypothesisIndex: h,
                         heard: token.text,
                         confidence: token.confidence,
                         start: token.start,
@@ -161,7 +174,7 @@ struct Passage {
                         timingEstimated: token.estimated)
                 }
             case .del(let p):
-                if p < lastConsumed { results[p].state = .missed }  // skipped over
+                if p < lastConsumed { results[p].state = .uncertain }  // skipped over
             }
         }
 
@@ -171,7 +184,6 @@ struct Passage {
         if inProgress, !results.contains(where: { $0.state == .current }) {
             let frontier = min(lastConsumed + 1, results.count)
             let next = results[frontier...].firstIndex { $0.state == .upcoming }
-                ?? results.firstIndex { $0.state == .upcoming }
             if let next { results[next].state = .current }
         }
         return results

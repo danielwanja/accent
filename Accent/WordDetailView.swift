@@ -1,203 +1,145 @@
 import SwiftUI
 
-/// Sheet shown when a word is tapped after a reading: the verdict, what the
-/// recognizer heard, and A/B audio — the user's slice vs a native reference.
+/// A word's recognition evidence, an actionable sound cue, and A/B playback.
 struct WordDetailView: View {
     let word: PassageWord
     let result: WordResult
     let recordingURL: URL?
-
     @State private var coach = AudioCoach()
-    @State private var phonemeScores: [PhonemeScorer.PhonemeScore]?
+
+    private var focus: PhonemeScorer.PhonemeScore? {
+        result.phonemeScores?.filter(\.needsPractice).min { $0.gop < $1.gop }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 12) {
-                Text(word.display)
-                    .font(.system(size: 40, weight: .regular, design: .serif))
-                    .foregroundStyle(Theme.ink)
-                verdictBadge
-                Spacer()
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Text(word.display)
+                        .font(.system(size: 34, weight: .regular, design: .serif))
+                        .foregroundStyle(Theme.ink)
+                    Text(badge)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(focus == nil ? Theme.muted : Theme.amber)
+                    Spacer()
+                }
 
-            if let ipa = Lexicon.ipa(for: word.norm) {
-                Text("/ \(ipa) /")
-                    .font(.system(size: 18, design: .serif))
-                    .foregroundStyle(Theme.accent)
-                    .accessibilityLabel("Expected pronunciation")
-            }
+                if let ipa = Lexicon.ipa(for: word.norm) {
+                    Text("/ \(ipa) /")
+                        .font(.system(size: 18, design: .serif))
+                        .foregroundStyle(Theme.ink)
+                        .accessibilityLabel("Reference pronunciation")
+                }
 
-            Text(verdictText)
-                .font(.system(size: 15, weight: .regular, design: .serif))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let scores = phonemeScores {
-                phonemeRow(scores)
-            }
-
-            if let stress = result.stressCheck, !stress.ok {
-                Text("STRESS — you leaned on syllable \(stress.detectedSyllable + 1) of \(stress.syllableCount); natives punch syllable \(stress.expectedSyllable + 1).")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .kerning(0.5)
-                    .foregroundStyle(Theme.amber)
+                Text(verdictText)
+                    .font(.system(size: 15, design: .serif))
+                    .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-            }
 
-            Divider().overlay(Theme.line)
-
-            HStack(spacing: 12) {
-                audioButton("NATIVE", icon: "speaker.wave.2") {
-                    coach.speakReference(word.display)
-                }
-                audioButton("SLOW", icon: "tortoise") {
-                    coach.speakReference(word.display, slow: true)
-                }
-                if let url = recordingURL, let start = result.start, let duration = result.duration {
-                    audioButton("YOUR TAKE", icon: "waveform") {
-                        // Estimated boundaries get generous context so the
-                        // word is never cut off mid-slice.
-                        coach.playSlice(recording: url, start: start, duration: duration,
-                                        pad: result.timingEstimated ? 0.25 : 0.08)
+                if let scores = result.phonemeScores {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(scores.enumerated()), id: \.offset) { _, score in
+                                Text((score.stressed ? "ˈ" : "") + score.ipa)
+                                    .font(.system(size: 18, design: .serif))
+                                    .foregroundStyle(score.needsPractice ? Theme.amber : Theme.muted)
+                                    .padding(7)
+                                    .overlay(RoundedRectangle(cornerRadius: 7)
+                                        .stroke(score.needsPractice ? Theme.amber : Theme.line))
+                                    .accessibilityLabel("\(score.ipa): \(score.needsPractice ? "try practicing" : "no correction suggested")")
+                            }
+                        }
                     }
                 }
+
+                if let focus {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("TRY /\(focus.ipa)/")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.amber)
+                        Text(Phonics.practiceCue(forPhone: focus.arpa))
+                            .font(.system(size: 16, design: .serif))
+                            .foregroundStyle(Theme.ink)
+                        Text("Listen slowly, say “\(word.display)” three times with this mouth position, then read it in the sentence at your normal pace.")
+                            .font(.system(size: 14, design: .serif))
+                            .foregroundStyle(Theme.muted)
+                    }
+                } else {
+                    Text("Listen to the reference, repeat the word, then put it back in the sentence. You do not need to match the reference voice or speed.")
+                        .font(.system(size: 14, design: .serif))
+                        .foregroundStyle(Theme.muted)
+                }
+
+                Divider().overlay(Theme.line)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { audioControls }
+                    VStack(alignment: .leading, spacing: 10) { audioControls }
+                }
+                if result.timingEstimated, result.start != nil {
+                    Text("Your clip includes nearby sounds because the word timing is approximate.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                }
             }
+            .padding(24)
         }
-        .padding(28)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityIdentifier("wordDetailsContent")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.paper)
         .onDisappear { coach.stopAll() }
-        .task {
-            // Tier-2 scores usually arrive with the take; fall back to
-            // scoring this word's slice on demand.
-            if let stored = result.phonemeScores {
-                phonemeScores = stored
-                return
-            }
-            guard let url = recordingURL,
-                  let start = result.start, let duration = result.duration else { return }
-            var loadedScorer = PhonemeScorer.ready
-            if loadedScorer == nil { loadedScorer = await PhonemeScorer.loaded() }
-            guard let scorer = loadedScorer else { return }
-            let norm = word.norm
-            let estimated = result.timingEstimated
-            phonemeScores = await Task.detached(priority: .userInitiated) {
-                scorer.score(wordNorm: norm, recording: url, start: start,
-                             duration: duration, estimatedTiming: estimated)
-            }.value
-        }
     }
 
-    /// One chip per expected phoneme, colored by its GOP verdict.
-    private func phonemeRow(_ scores: [PhonemeScorer.PhonemeScore]) -> some View {
-        HStack(spacing: 6) {
-            ForEach(Array(scores.enumerated()), id: \.offset) { _, score in
-                let color: Color = switch Self.chipVerdict(for: score) {
-                case .clean: Theme.ink
-                case .accented: Theme.amber
-                case .missed: Theme.accent
-                }
-                Text((score.stressed ? "ˈ" : "") + score.ipa)
-                    .font(.system(size: 18, weight: .medium, design: .serif))
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(color.opacity(0.45), lineWidth: 1))
-            }
-            Spacer()
+    private var badge: String {
+        switch result.state {
+        case .spoken: return "UNDERSTOOD"
+        case .accented, .missed: return "PRACTICE"
+        case .uncertain: return "CHECK AUDIO"
+        case .upcoming, .current: return "NOT REACHED"
         }
-        .accessibilityLabel("Phoneme scores")
-    }
-
-    private var verdictBadge: some View {
-        Group {
-            switch result.state {
-            case .spoken:
-                badge("CLEAN", color: Theme.muted)
-            case .accented:
-                badge("ACCENTED", color: Theme.amber)
-            case .missed:
-                badge("MISSED", color: Theme.accent)
-            case .upcoming, .current:
-                badge("NOT READ", color: Theme.upcoming)
-            }
-        }
-    }
-
-    private func badge(_ label: String, color: Color) -> some View {
-        Text(label)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .kerning(1.5)
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .overlay(Capsule().stroke(color.opacity(0.5), lineWidth: 1))
     }
 
     private var verdictText: String {
-        let confidenceNote = result.confidence.map { " (confidence \(Int($0 * 100))%)" } ?? ""
+        if let focus {
+            return "The word was understood. The sound check suggests reviewing /\(focus.ipa)/. Listen to both clips first; this is a practice suggestion, not a definite error."
+        }
         switch result.state {
         case .spoken:
-            return "Recognized cleanly\(confidenceNote)."
-        case .accented:
-            // Prefer the phoneme evidence when tier-2 produced it.
-            if let scores = phonemeScores ?? result.phonemeScores {
-                let drifted = scores
-                    .filter { PhonemeScorer.Verdict(gop: $0.gop) != .clean }
-                    .map { "/\($0.ipa)/" }
-                if !drifted.isEmpty {
-                    return "The word landed, but \(drifted.joined(separator: ", ")) drifted from the native target."
-                }
+            if result.phonemeScores?.contains(where: { $0.isAssessed }) == true {
+                return "The word was understood, with no strong sound difference detected."
             }
+            return "The word was understood. There isn't enough reliable sound evidence to assess its pronunciation in this take."
+        case .uncertain, .missed, .accented:
             if let heard = result.heard {
-                return "The recognizer got “\(heard)”, but only just\(confidenceNote). That hesitation usually means an accented vowel or consonant."
+                return "The recognizer wrote “\(heard)”. This can happen with natural pronunciation too. Replay your clip before deciding whether to practice."
             }
-            return "Recognized, but with low confidence\(confidenceNote)."
-        case .missed:
-            // A missed verdict can come from tier-2 even when the recognizer
-            // got the word — blame the phonemes, not the recognition.
-            let heardTheWord = result.heard.map { Passage.normalize($0) == word.norm } ?? false
-            if heardTheWord, let scores = phonemeScores ?? result.phonemeScores {
-                let off = scores
-                    .filter { PhonemeScorer.Verdict(gop: $0.gop) == .missed }
-                    .map { "/\($0.ipa)/" }
-                if !off.isEmpty {
-                    return "The word was understood, but \(off.joined(separator: ", ")) \(off.count == 1 ? "was" : "were") far from the native sound."
-                }
-            }
-            if let heard = result.heard, !heardTheWord {
-                return "Heard “\(heard)” instead\(confidenceNote)."
-            }
-            return "Skipped — the recognizer never heard this word."
+            return "This word wasn't matched in the transcript. It may have been skipped or missed by recognition; that does not establish a pronunciation error."
         case .upcoming, .current:
-            return "This word wasn't read in the last take."
+            return "This word wasn't reached in the last take. You can still listen and practice it."
         }
     }
 
-    /// Chip color verdict; low-confidence phones (e.g. /h/) cap at amber.
-    private static func chipVerdict(for score: PhonemeScorer.PhonemeScore) -> PhonemeScorer.Verdict {
-        let verdict = PhonemeScorer.Verdict(gop: score.gop)
-        if verdict == .missed, PhonemeScorer.lowConfidencePhones.contains(score.arpa) {
-            return .accented
+    @ViewBuilder private var audioControls: some View {
+        audioButton("REFERENCE", icon: "speaker.wave.2") { coach.speakReference(word.display) }
+        audioButton("SLOW", icon: "tortoise") { coach.speakReference(word.display, slow: true) }
+        if let url = recordingURL, let start = result.start, let duration = result.duration {
+            audioButton("YOUR TAKE", icon: "waveform") {
+                coach.playSlice(recording: url, start: start, duration: duration,
+                                pad: result.timingEstimated ? 0.25 : 0.12)
+            }
         }
-        return verdict
     }
 
     private func audioButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .kerning(1)
-                    .fixedSize()
-            }
-            .foregroundStyle(Theme.ink)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .overlay(Capsule().stroke(Theme.line, lineWidth: 1.5))
+            Label(label, systemImage: icon)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .fixedSize()
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .overlay(Capsule().stroke(Theme.line, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("audio-\(label)")
     }
 }

@@ -92,6 +92,33 @@ enum Phonics {
             drillText: "Turn it off and hand it over. Pick it up, put it on, and read it out in an even tone."),
     ]
 
+    static func practiceCue(forPhone phone: String) -> String {
+        switch phone {
+        case "TH": return "Rest the tongue tip lightly between your teeth and blow air continuously. Keep your voice off, as in ‘think’. Avoid closing the airflow into a t."
+        case "DH": return "Rest the tongue tip lightly between your teeth and let air flow while your voice buzzes, as in ‘this’. Avoid closing into a d."
+        case "IH": return "For the vowel in ‘ship’, relax your tongue and lower it slightly from French i. Focus on the relaxed vowel quality, not just making it shorter."
+        case "IY": return "For the vowel in ‘sheep’, keep your tongue high and forward, with lips gently spread. Hold the vowel steady without adding a glide."
+        case "R", "ER": return "For American r, draw your tongue back slightly and lift its sides toward the upper back teeth. Keep the middle free of contact and avoid a vibration in the throat."
+        case "AE": return "For the vowel in ‘cat’, open your jaw and keep your tongue low and forward. Start from ‘bed’ and open your mouth further."
+        case "EH": return "For the vowel in ‘bed’, keep your tongue forward and your jaw moderately open. Keep it steady without sliding toward ‘ay’."
+        case "AH": return "Relax your lips and tongue near the center of your mouth. An unstressed ‘uh’ should feel light and easy, without forcing a full French vowel."
+        case "AA", "AO": return "Open your jaw and keep the tongue toward the back. Listen to the reference vowel; American speakers also vary in how they distinguish these sounds."
+        case "UH": return "For the vowel in ‘book’, relax your tongue from the high position of ‘oo’ and round your lips only gently."
+        case "UW": return "For ‘oo’, round your lips and keep your tongue high. Let the vowel flow smoothly without adding a consonant at the end."
+        case "EY", "AY", "OW", "AW", "OY": return "Listen for the vowel's starting and ending positions. Move smoothly between them within one syllable instead of holding a single French vowel."
+        case "L": return "Touch your tongue tip just behind the upper front teeth and let the voice flow around its sides. Avoid adding an extra vowel after a final l."
+        case "W": return "Round your lips, then open them smoothly into the next vowel. Keep your upper teeth away from your lower lip."
+        case "V", "F": return "Bring your upper teeth gently against your lower lip and let air flow. Use a voice buzz for v; just air for f."
+        case "S", "Z": return "Keep the tongue close behind the teeth and direct a narrow stream of air forward. Use a voice buzz for z and no buzz for s."
+        case "Y": return "Start with your tongue high and forward, near French i, then glide straight into the vowel without adding a separate syllable."
+        case "B", "P", "D", "T", "G", "K": return "Make a brief closure, then release into the next sound. At the end of a word, avoid adding an extra ‘uh’; a strong audible release is not always needed."
+        case "M", "N", "NG": return "Let your voice resonate through your nose. Close the lips for m, touch behind the upper teeth for n, or lift the back of the tongue for the final sound in ‘sing’."
+        default:
+            if let id = issueIDs(forPhone: phone).first, let issue = issue(id) { return issue.cue }
+            return "Listen slowly to this sound in the reference, then repeat it within the word with relaxed, steady airflow."
+        }
+    }
+
     static func issue(_ id: String) -> Issue? {
         issues.first { $0.id == id }
     }

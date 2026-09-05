@@ -47,6 +47,11 @@ struct ProgressScreen: View {
     private var masteryBars: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionLabel("BY SOUND")
+            if IssueProfile.stats(from: takes).isEmpty {
+                Text("Sound progress appears after a take with reliable sound evidence. Recognition alone doesn't measure pronunciation.")
+                    .font(.system(size: 14, design: .serif))
+                    .foregroundStyle(Theme.muted)
+            }
             ForEach(IssueProfile.stats(from: takes)) { stat in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
@@ -77,15 +82,15 @@ struct ProgressScreen: View {
 
     private var cleanRateChart: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionLabel("CLEAN RATE")
+            sectionLabel("WORDS UNDERSTOOD")
             Chart(Array(takes.reversed().enumerated()), id: \.offset) { index, take in
                 LineMark(
                     x: .value("Read", index + 1),
-                    y: .value("Clean", take.readCount == 0 ? 0 : Double(take.cleanCount) / Double(take.readCount)))
+                    y: .value("Understood", take.readCount == 0 ? 0 : Double(take.understoodCount) / Double(take.readCount)))
                     .foregroundStyle(Theme.accent)
                 PointMark(
                     x: .value("Read", index + 1),
-                    y: .value("Clean", take.readCount == 0 ? 0 : Double(take.cleanCount) / Double(take.readCount)))
+                    y: .value("Understood", take.readCount == 0 ? 0 : Double(take.understoodCount) / Double(take.readCount)))
                     .foregroundStyle(Theme.accent)
             }
             .chartYScale(domain: 0...1)
@@ -120,9 +125,9 @@ struct ProgressScreen: View {
                             .foregroundStyle(Theme.muted)
                     }
                     Spacer()
-                    Text("\(take.cleanCount)/\(take.readCount)")
+                    Text("\(take.understoodCount)/\(take.readCount)")
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(take.cleanCount == take.readCount ? Theme.muted : Theme.accent)
+                        .foregroundStyle(take.understoodCount == take.readCount ? Theme.muted : Theme.accent)
                 }
                 .padding(.vertical, 4)
             }
