@@ -146,7 +146,9 @@ final class AudioCoach: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 synthesizer.usesApplicationAudioSession = true
                 synthesizer.delegate = self
                 self.synthesizer = synthesizer
+                #if DEBUG
                 print("ACCENT audio: speak \"\(text)\" voice=\(voice?.name ?? "default")")
+                #endif
                 synthesizer.speak(utterance)
             } catch is CancellationError {
                 // Another tap or dismissal replaced this request.

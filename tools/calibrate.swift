@@ -1,6 +1,7 @@
 import Foundation
 
-let root = "/Users/danielwanja/GitProjects/accent"
+// Run from the repository root, or pass its path as the first argument.
+let root = CommandLine.arguments.dropFirst().first ?? FileManager.default.currentDirectoryPath
 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("calib", isDirectory: true)
 try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
 let scorer = try PhonemeScorer(

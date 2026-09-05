@@ -3,9 +3,20 @@
 # Usage: ./run.sh
 set -euo pipefail
 
-export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
-
-SIM_UDID="473019D8-0FC1-4925-8AA9-BB213E0316B5"   # iPhone 17 Pro, iOS 26.2
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode-beta.app/Contents/Developer ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+fi
+if [[ -z "${SIM_UDID:-}" ]]; then
+  SIM_UDID=$(xcrun simctl list devices available -j | xcrun python3 -c '
+import json, sys
+devices = json.load(sys.stdin)["devices"].get("com.apple.CoreSimulator.SimRuntime.iOS-26-2", [])
+print(next((d["udid"] for d in devices if d["name"] == "iPhone 17 Pro"), ""))
+')
+fi
+if [[ -z "$SIM_UDID" ]]; then
+  echo "Install an iPhone 17 Pro / iOS 26.2 simulator, or set SIM_UDID to an installed device." >&2
+  exit 1
+fi
 BUNDLE_ID="com.n-so.accent"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -22,6 +33,7 @@ APP_PATH="build/Build/Products/Debug-iphonesimulator/Accent.app"
 
 echo "▸ Booting simulator…"
 xcrun simctl boot "$SIM_UDID" 2>/dev/null || true   # already booted is fine
+xcrun simctl bootstatus "$SIM_UDID" -b
 open -a Simulator
 
 echo "▸ Installing…"

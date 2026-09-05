@@ -3,7 +3,7 @@ import CoreML
 import Foundation
 import os
 
-/// Tier-2 pronunciation scoring (PLAN.md §3.3): a wav2vec2-base phoneme CTC
+/// Tier-2 pronunciation scoring: a wav2vec2-base phoneme CTC
 /// model (Core ML, on-device) is force-aligned against the word's expected
 /// CMUdict phonemes. Peak posterior margins compare the expected sound
 /// with a confident competitor, without treating CTC blanks as errors.

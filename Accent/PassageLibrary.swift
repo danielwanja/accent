@@ -3,7 +3,7 @@ import Foundation
 struct LibraryPassage: Identifiable {
     let id: String
     let title: String
-    let focus: String   // which French → English issue it targets (PLAN.md §4)
+    let focus: String   // which French → English issue it targets
     let text: String
 }
 

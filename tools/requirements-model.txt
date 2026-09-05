@@ -1,0 +1,5 @@
+# Versions used for the local FP16 conversion (Python 3.13 / Apple Silicon).
+numpy==2.5.2
+torch==2.13.0
+transformers==5.15.1
+coremltools==9.0

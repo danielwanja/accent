@@ -14,7 +14,7 @@ extension UIColor {
     }
 }
 
-// Palette from the Accent plan: warm paper, cool ink, record red, karaoke amber.
+// Warm paper, cool ink, record red, and practice amber.
 enum Theme {
     static let paper = Color(uiColor: UIColor(light: 0xFBFBF8, dark: 0x17191E))
     static let surface = Color(uiColor: UIColor(light: 0xF3F3EE, dark: 0x1F2229))

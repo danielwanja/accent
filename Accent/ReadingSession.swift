@@ -45,6 +45,28 @@ final class ReadingSession {
         reset()
     }
 
+    #if DEBUG
+    /// Illustrative fixture for documentation screenshots, never a scored recording.
+    /// AccentApp uses an in-memory store and skips model/microphone work in this mode.
+    func loadScreenshotDemo() {
+        let sample = PassageLibrary.curated[0]
+        load(title: sample.title, text: sample.text)
+        results = passage.words.map { word in
+            if word.norm == "think" {
+                return WordResult(state: .accented, phonemeScores: [
+                    .init(arpa: "TH", ipa: "θ", gop: -4, evidenceFrames: 2, competingIPA: "s"),
+                    .init(arpa: "IH", ipa: "ɪ", gop: 0, evidenceFrames: 2, stressed: true),
+                    .init(arpa: "NG", ipa: "ŋ", gop: 0, evidenceFrames: 2),
+                    .init(arpa: "K", ipa: "k", gop: 0, evidenceFrames: 2)
+                ])
+            }
+            return WordResult(state: .spoken)
+        }
+        scoringAvailable = true
+        status = .finished
+    }
+    #endif
+
     func toggle() {
         if isRecording {
             Task { await stop() }

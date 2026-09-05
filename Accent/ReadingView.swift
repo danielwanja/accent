@@ -7,6 +7,7 @@ struct ReadingView: View {
     @State private var pulse = false
     @State private var showingPicker = false
     @State private var selectedWord: SelectedWord?
+    @State private var detailDetent: PresentationDetent = .medium
 
     private var session: ReadingSession { app.session }
 
@@ -48,6 +49,11 @@ struct ReadingView: View {
             #if DEBUG
             // "-showword N" opens word N's card once the take finishes.
             let args = ProcessInfo.processInfo.arguments
+            if let index = args.firstIndex(of: "-screenshotDemo"), index + 1 < args.count,
+               args[index + 1] == "word" {
+                detailDetent = .large
+                selectedWord = SelectedWord(id: 1)
+            }
             if args.contains("-testWordDetails") {
                 selectedWord = SelectedWord(id: 0)
             }
@@ -107,7 +113,7 @@ struct ReadingView: View {
                             }
                         }
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium, .large], selection: $detailDetent)
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.paper)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))

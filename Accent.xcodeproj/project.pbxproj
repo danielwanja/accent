@@ -6,21 +6,42 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		000000000000000000ACD008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = ACC0000000000000000000A0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = ACC0000000000000000000A5;
+			remoteInfo = Accent;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		000000000000000000ACD002 /* AccentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AccentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		ACC0000000000000000000A2 /* Accent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Accent.app; sourceTree = BUILT_PRODUCTS_DIR; };
-000000000000000000ACD002 /* AccentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AccentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		000000000000000000ACD003 /* AccentUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AccentUITests;
+			sourceTree = "<group>";
+		};
 		ACC0000000000000000000A1 /* Accent */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Accent;
 			sourceTree = "<group>";
 		};
-000000000000000000ACD003 /* AccentUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = AccentUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		000000000000000000ACD005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		ACC0000000000000000000B2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -28,7 +49,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-000000000000000000ACD005 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -36,7 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				ACC0000000000000000000A1 /* Accent */,
-000000000000000000ACD003 /* AccentUITests */,
+				000000000000000000ACD003 /* AccentUITests */,
 				ACC0000000000000000000A4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -45,7 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				ACC0000000000000000000A2 /* Accent.app */,
-000000000000000000ACD002 /* AccentUITests.xctest */,
+				000000000000000000ACD002 /* AccentUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,6 +73,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		000000000000000000ACD001 /* AccentUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000ACD009 /* Build configuration list for PBXNativeTarget "AccentUITests" */;
+			buildPhases = (
+				000000000000000000ACD004 /* Sources */,
+				000000000000000000ACD005 /* Frameworks */,
+				000000000000000000ACD006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				000000000000000000ACD007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				000000000000000000ACD003 /* AccentUITests */,
+			);
+			name = AccentUITests;
+			productName = AccentUITests;
+			productReference = 000000000000000000ACD002 /* AccentUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		ACC0000000000000000000A5 /* Accent */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = ACC0000000000000000000C1 /* Build configuration list for PBXNativeTarget "Accent" */;
@@ -75,26 +116,8 @@
 			productReference = ACC0000000000000000000A2 /* Accent.app */;
 			productType = "com.apple.product-type.application";
 		};
-000000000000000000ACD001 /* AccentUITests */ = {
- isa = PBXNativeTarget;
- buildConfigurationList = 000000000000000000ACD009;
- buildPhases = (000000000000000000ACD004, 000000000000000000ACD005, 000000000000000000ACD006);
- buildRules = ();
- dependencies = (000000000000000000ACD007);
- fileSystemSynchronizedGroups = (000000000000000000ACD003);
- name = AccentUITests;
- productName = AccentUITests;
- productReference = 000000000000000000ACD002;
- productType = "com.apple.product-type.bundle.ui-testing";
-};
 /* End PBXNativeTarget section */
 
-/* Begin PBXContainerItemProxy section */
-000000000000000000ACD008 = {isa = PBXContainerItemProxy; containerPortal = ACC0000000000000000000A0; proxyType = 1; remoteGlobalIDString = ACC0000000000000000000A5; remoteInfo = Accent; };
-/* End PBXContainerItemProxy section */
-/* Begin PBXTargetDependency section */
-000000000000000000ACD007 = {isa = PBXTargetDependency; target = ACC0000000000000000000A5; targetProxy = 000000000000000000ACD008; };
-/* End PBXTargetDependency section */
 /* Begin PBXProject section */
 		ACC0000000000000000000A0 /* Project object */ = {
 			isa = PBXProject;
@@ -123,12 +146,19 @@
 			projectRoot = "";
 			targets = (
 				ACC0000000000000000000A5 /* Accent */,
-000000000000000000ACD001 /* AccentUITests */,
+				000000000000000000ACD001 /* AccentUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		000000000000000000ACD006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		ACC0000000000000000000B3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -136,10 +166,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-000000000000000000ACD006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		000000000000000000ACD004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		ACC0000000000000000000B1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -147,10 +183,45 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-000000000000000000ACD004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		000000000000000000ACD007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = ACC0000000000000000000A5 /* Accent */;
+			targetProxy = 000000000000000000ACD008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		000000000000000000ACD00A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.n-so.accent.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Accent;
+			};
+			name = Debug;
+		};
+		000000000000000000ACD00B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.n-so.accent.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Accent;
+			};
+			name = Release;
+		};
 		ACC0000000000000000000D1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -270,9 +341,9 @@
 		ACC0000000000000000000D3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LQX2KQ77LP;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Accent listens while you read so it can highlight each word and coach your pronunciation. Audio is analyzed on this device only.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Accent transcribes your reading on-device to compare it with the passage.";
@@ -297,9 +368,9 @@
 		ACC0000000000000000000D4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LQX2KQ77LP;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Accent listens while you read so it can highlight each word and coach your pronunciation. Audio is analyzed on this device only.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Accent transcribes your reading on-device to compare it with the passage.";
@@ -321,31 +392,18 @@
 			};
 			name = Release;
 		};
-000000000000000000ACD00A = {isa = XCBuildConfiguration; buildSettings = {
- CODE_SIGN_STYLE = Automatic;
- DEVELOPMENT_TEAM = LQX2KQ77LP;
- GENERATE_INFOPLIST_FILE = YES;
- IPHONEOS_DEPLOYMENT_TARGET = 26.0;
- PRODUCT_BUNDLE_IDENTIFIER = "com.n-so.accent.uitests";
- PRODUCT_NAME = "$(TARGET_NAME)";
- SWIFT_VERSION = 5.0;
- TARGETED_DEVICE_FAMILY = 1;
- TEST_TARGET_NAME = Accent;
- }; name = Debug; };
-000000000000000000ACD00B = {isa = XCBuildConfiguration; buildSettings = {
- CODE_SIGN_STYLE = Automatic;
- DEVELOPMENT_TEAM = LQX2KQ77LP;
- GENERATE_INFOPLIST_FILE = YES;
- IPHONEOS_DEPLOYMENT_TARGET = 26.0;
- PRODUCT_BUNDLE_IDENTIFIER = "com.n-so.accent.uitests";
- PRODUCT_NAME = "$(TARGET_NAME)";
- SWIFT_VERSION = 5.0;
- TARGETED_DEVICE_FAMILY = 1;
- TEST_TARGET_NAME = Accent;
- }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		000000000000000000ACD009 /* Build configuration list for PBXNativeTarget "AccentUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000ACD00A /* Debug */,
+				000000000000000000ACD00B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		ACC0000000000000000000C0 /* Build configuration list for PBXProject "Accent" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -364,7 +422,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-000000000000000000ACD009 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000ACD00A, 000000000000000000ACD00B); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 	};
 	rootObject = ACC0000000000000000000A0 /* Project object */;

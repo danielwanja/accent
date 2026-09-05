@@ -17,6 +17,7 @@ struct AccentApp: App {
         #if DEBUG
         return ProcessInfo.processInfo.arguments.contains("-audioSmokeTest")
             || ProcessInfo.processInfo.arguments.contains("-testWordDetails")
+            || ProcessInfo.processInfo.arguments.contains("-screenshotDemo")
         #else
         return false
         #endif
@@ -43,6 +44,15 @@ struct RootView: View {
         .tint(Theme.accent)
         .onAppear {
             #if DEBUG
+            let args = ProcessInfo.processInfo.arguments
+            if let index = args.firstIndex(of: "-screenshotDemo"), index + 1 < args.count {
+                Lexicon.warmUp()
+                if args[index + 1] != "today" {
+                    app.session.loadScreenshotDemo()
+                    app.tab = .read
+                }
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("-audioSmokeTest") {
                 Task { await AudioCoach.runPlaybackSmokeTest() }
                 return

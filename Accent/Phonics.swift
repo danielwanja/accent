@@ -1,6 +1,6 @@
 import Foundation
 
-/// One entry in the French → American English issue map (PLAN.md §4):
+/// One entry in the French → American English issue map:
 /// a residual accent feature, why it happens, and how to coach it.
 struct Issue: Identifiable, Hashable {
     let id: String

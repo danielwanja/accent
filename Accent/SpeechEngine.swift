@@ -7,6 +7,7 @@ enum SpeechEngineError: LocalizedError {
     case microphoneUnavailable
     case speechDenied
     case localeUnsupported
+    case onDeviceUnavailable
     case notPrepared
 
     var errorDescription: String? {
@@ -15,6 +16,7 @@ enum SpeechEngineError: LocalizedError {
         case .microphoneUnavailable: return "The microphone isn't available right now — try again."
         case .speechDenied: return "Speech recognition access was denied. Enable it in Settings."
         case .localeUnsupported: return "English transcription isn't available on this device."
+        case .onDeviceUnavailable: return "On-device English recognition isn't available here. Accent keeps your voice on this device. Try a supported iPhone with English speech assets installed."
         case .notPrepared: return "Speech engine wasn't prepared before starting."
         }
     }
@@ -23,9 +25,8 @@ enum SpeechEngineError: LocalizedError {
 /// Captures mic audio and emits live transcript updates.
 ///
 /// Prefers the iOS 26 SpeechAnalyzer pipeline (fully on-device, word timings).
-/// Falls back to SFSpeechRecognizer where the analyzer's model assets aren't
-/// available — notably the simulator. The fallback also matters later: it is
-/// the API that exposes per-word confidence for tier-1 scoring.
+/// Falls back to SFSpeechRecognizer only when it supports on-device recognition.
+/// Never sends microphone audio to a server when local recognition is unavailable.
 final class SpeechEngine {
     /// Both backends reduce to the same shape: non-final updates replace the
     /// current in-flight hypothesis segment; final updates commit it. SFSpeech
@@ -99,6 +100,9 @@ final class SpeechEngine {
         guard status == .authorized else { throw SpeechEngineError.speechDenied }
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
             throw SpeechEngineError.localeUnsupported
+        }
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw SpeechEngineError.onDeviceUnavailable
         }
         legacyRecognizer = recognizer
         backend = .legacy
@@ -247,12 +251,13 @@ final class SpeechEngine {
 
     private func startLegacy(onUpdate: @escaping @MainActor (Update) -> Void) throws {
         guard let recognizer = legacyRecognizer else { throw SpeechEngineError.notPrepared }
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw SpeechEngineError.onDeviceUnavailable
+        }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = true
         legacyRequest = request
 
         legacyFinished.withLock { $0 = false }
@@ -260,7 +265,9 @@ final class SpeechEngine {
             if let error { print("ACCENT sfspeech error: \(error)") }
             guard let result else { return }
             if result.isFinal {
+                #if DEBUG
                 print("ACCENT final segments: \(result.bestTranscription.segments.map { "\($0.substring)|c\($0.confidence)|t\($0.timestamp)+\($0.duration)" })")
+                #endif
             }
             // Partial results report confidence 0 and no timing — map those to
             // nil. A hypothesis reset arrives as a final whose transcription is

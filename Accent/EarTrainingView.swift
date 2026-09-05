@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Minimal-pair tap test (PLAN.md §5.2): discrimination precedes production.
+/// Minimal-pair tap test: discrimination precedes production.
 /// A native voice says one word of a pair; the user taps which one they
 /// heard. Rounds weight toward the profile's weakest issues.
 struct EarTrainingView: View {

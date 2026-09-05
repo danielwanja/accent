@@ -5,3 +5,22 @@ tools/venv/
 tools/models/
 # 189MB Core ML model - regenerate with tools/convert.py
 Accent/PhonemeRecognizer.mlpackage/
+
+# Local credentials, signing files, recordings, and diagnostics
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.xcuserstate
+*.xcresult/
+*.log
+*.caf
+*.wav
+*.m4a
+*.sqlite*
+*.store*
+__pycache__/
+.venv/
